@@ -1,0 +1,21 @@
+# git上传屏蔽配置信息
+# 敏感配置
+src/memory/mysql_config.yml
+.env
+
+# python运行缓存
+__pycache__/
+*.pyc
+
+# IDE配置
+.idea/
+*.iml
+
+# 运行日志、数据目录等
+logs/
+src/db/
+src/data/
+src/rag_agent/rag/kb_file_registry
+
+*.db
+*.sqlite
