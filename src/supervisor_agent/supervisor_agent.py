@@ -111,7 +111,7 @@ class SupervisorAgent(BaseAgentTemplate):
             is_attack = json_data.get("Safety_inspection", False)
             if is_attack:
                 log.warning(f" [TopSupervisor] 提示词注入攻击已拦截，原始输入：{user_input}")
-            log.info(f"安全检验已完成, 可放行")
+
             return is_attack
         except json.JSONDecodeError:
             # json解析失败，默认放行，避免正常请求卡死
