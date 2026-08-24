@@ -70,7 +70,7 @@ class QWENProvider:
 class OllamaProvider:
     """ Ollama供应商类, 创建客户端."""
     supported_models_chat = ["qwen3.5:9b"]
-    supported_models_embed = ["qwen3-embedding:4b"]
+    supported_models_embed = ["qwen3-embedding:8b"]
 
     def __init__(self, config: ProviderConfig):
         self.coning = config

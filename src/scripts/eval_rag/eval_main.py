@@ -6,6 +6,7 @@ from typing import List, Dict
 TOP_K = 5
 # 使用你项目内已支持的聊天模型，改成你实际要用的
 JUDGE_MODEL_NAME = "qwen3.7-flash"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 QUESTION_FILE = os.path.join(BASE_DIR, "eval_questions.json")
