@@ -25,7 +25,7 @@ def get_score(query: str, chunk_texts: List[str], chat_model):
             {chr(10).join(chunk_texts)}
             评估片段能否支撑完整回答问题，仅输出0-100整数，不要其他文字。
             """
-    # langchain BaseChatModel .invoke
+
     resp = chat_model.invoke(prompt)
     raw = resp.content.strip()
     return int("".join(c for c in raw if c.isdigit()))
