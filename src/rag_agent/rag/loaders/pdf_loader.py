@@ -31,7 +31,7 @@ def _describe_image(image_bytes: bytes, ext: str, page_text: str = "") -> str:
         "4. 数据与结论：关键数字、趋势、流程或结论\n"
     )
     if page_text:
-        prompt = f"当前页面文字内容：\n---\n{page_text[:500]}\n---\n\n" + prompt
+        prompt = f"当前页面文字内容：\n---\n{page_text[:200]}\n---\n\n" + prompt
     message = HumanMessage(content=[
         {"type": "text", "text": prompt},
         {"type": "image_url",
@@ -101,3 +101,4 @@ class PDFLoader(DocumentLoader):
         if not documents:
             raise ValueError(f"PDF 未解析出任何可入库内容:{file_path}")
         return documents
+

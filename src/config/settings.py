@@ -34,21 +34,21 @@ class AppSettings(BaseSettings):
 
     # chroma向量库 __
     chroma_persist_path: Optional[str] = str(BASE_DIR /"src/db/cloud_chroma_db")  # 持久化路径
-    chroma_embedding_model: Optional[str] = "qwen3.7-text-embedding"  # 嵌入模型
+    chroma_embedding_model: Optional[str] = "qwen3-embedding:8b"  # 嵌入模型
     chroma_search_top_k: int = 4  # 搜索相似度检索返回条数
 
     # faiss向量库 __
     faiss_persist_path: str = str(BASE_DIR /"src/db/cloud_faiss_db")  # 持久化路径
-    faiss_embedding_model: str = "qwen3.7-text-embedding"  # 嵌入模型
+    faiss_embedding_model: str = "qwen3-embedding:8b"  # 嵌入模型
     faiss_search_top_k: int = 4  # 搜索相似度检索返回条数
     faiss_meta_path: str = str(BASE_DIR / "src/db/cloud_faiss_db/file_meta.json")   # 元数据存储路径
 
     # rag链路 __
     rag_vector_store_name: str = "chroma"   # 当前使用向量库
-    rag_chat_model: Optional[str] = "qwen3.7-flash"   # 对话模型
+    rag_chat_model: Optional[str] = "qwen3.5:9b"   # 对话模型
 
     # 通用agent __
-    agent_default_model: Optional[str] = "qwen3.7-flash"  # 所有agent使用模型
+    agent_default_model: Optional[str] = "qwen3.5:9b"  # 所有agent使用模型
     agent_debug_mode: bool = True  # 调试模式
 
 
