@@ -1,6 +1,6 @@
-﻿import json
+import json
 import os
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 from src.utils.logger import log
 
@@ -19,7 +19,8 @@ def load_questions(filepath: str) -> List[Dict]:
         return json.load(f)
 
 
-def get_score(query: str, chunk_texts: List[str], chat_model) -> int:
+def get_score(query: str, chunk_texts: List[str], chat_model) -> Tuple[int, str]:
+    """返回 (分数, 模型原始输出)，0 分时可通过原始输出判断是解析失败还是真低分。"""
     prompt = (
         f"问题：{query}\n"
         f"检索片段：\n"
@@ -31,39 +32,49 @@ def get_score(query: str, chunk_texts: List[str], chat_model) -> int:
         "- 0-49：检索内容基本无法支撑回答\n\n"
         "仅输出整数分数，不要其他文字。"
     )
-    resp = chat_model.invoke(prompt)
-    raw = resp.content.strip()
+    resp = chat_model.invoke(prompt, reasoning=False)
+    raw = str(resp.content).strip()
     digits = "".join(c for c in raw if c.isdigit())
-    return min(int(digits), 100) if digits else 0
+    score = min(int(digits), 100) if digits else 0
+    return score, raw
 
 
 def run_eval(rag_factory, llm_factory):
     questions = load_questions(QUESTION_FILE)
-    result_list = []
-    pass_cnt = 0
+    total = len(questions)
 
-    chat_model = llm_factory.get_client(JUDGE_MODEL_NAME)
-
-    for item in questions:
+    # 阶段1：全部检索，embedding 模型只加载一次，连续调用
+    retrieved = []
+    for idx, item in enumerate(questions, start=1):
         q = item["query"]
         chunks = rag_factory.query(query=q, k=TOP_K)
+        retrieved.append({"query": q, "chunks": chunks})
+        log.info(f"[Eval] 检索进度 {idx}/{total}")
+
+    # 阶段2：统一评分，聊天模型只加载一次，连续调用
+    chat_model = llm_factory.get_client(JUDGE_MODEL_NAME)
+    result_list = []
+    pass_cnt = 0
+    for idx, item in enumerate(retrieved, start=1):
+        q = item["query"]
+        chunks = item["chunks"]
         texts = [c["content"] for c in chunks]
-        score = get_score(q, texts, chat_model)
+        score, raw_output = get_score(q, texts, chat_model)
+        log.info(f"[Eval] 评分进度 {idx}/{total} 分数 {score}")
 
         is_pass = score >= PASS_SCORE
         if is_pass:
             pass_cnt += 1
-
         result_list.append({
             "query": q,
             "top_k": TOP_K,
             "chunk_num": len(chunks),
             "score": score,
+            "raw_output": raw_output,
             "is_pass": is_pass,
             "chunks": chunks,
         })
 
-    total = len(questions)
     pass_rate = pass_cnt / total if total else 0
     avg_score = sum(r["score"] for r in result_list) / total if total else 0
 

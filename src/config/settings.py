@@ -22,7 +22,7 @@ class AppSettings(BaseSettings):
 
     # ollama本地 __
     ollama_base_url: str = "http://localhost:11434"
-    ollama_timeout: int = 15
+    ollama_timeout: int = 120
     ollama_temperature: float = 0.7
 
     # 记忆模块配置 __
@@ -37,6 +37,7 @@ class AppSettings(BaseSettings):
     chroma_embedding_model: Optional[str] = "qwen3-embedding:8b"  # 嵌入模型
     chroma_search_top_k: int = 4  # 搜索相似度检索返回条数
 
+
     # faiss向量库 __
     faiss_persist_path: str = str(BASE_DIR /"src/db/cloud_faiss_db")  # 持久化路径
     faiss_embedding_model: str = "qwen3-embedding:8b"  # 嵌入模型
@@ -46,6 +47,8 @@ class AppSettings(BaseSettings):
     # rag链路 __
     rag_vector_store_name: str = "chroma"   # 当前使用向量库
     rag_chat_model: Optional[str] = "qwen3.5:9b"   # 对话模型
+    rag_vision_model:  str  = "qwen3-vl:2b"
+    rag_data_path: str = ""
 
     # 通用agent __
     agent_default_model: Optional[str] = "qwen3.5:9b"  # 所有agent使用模型

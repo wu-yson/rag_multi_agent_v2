@@ -25,8 +25,12 @@ def load_kb_file_registry() -> list[Dict]:
     """加载文件入库台账，不存在返回空列表"""
     if not KB_FILE_REGISTRY_PATH.exists():
         return []
-    with open(KB_FILE_REGISTRY_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(KB_FILE_REGISTRY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        logger.warning(f"台账文件缺失或损坏，按空台账处理: {KB_FILE_REGISTRY_PATH}")
+        return []
 
 def save_kb_file_registry(registry: list[Dict]):
     """保存台账，同名file_md5会覆盖旧条目"""

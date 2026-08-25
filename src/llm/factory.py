@@ -7,8 +7,8 @@ from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_core.language_models import BaseChatModel
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_core.embeddings import Embeddings
+from openai import OpenAI
 from src.llm.models import ProviderInitializationError, ProviderConfig, ModelNotSupportedError
-
 
 
 # ========== 加载供应商配置 ==========
@@ -38,6 +38,7 @@ class QWENProvider:
     """ QWEN供应商类, 创建客户端."""
     supported_models_chat = ["qwen3.7-flash"]
     supported_models_embed = ["qwen3.7-text-embedding"]
+
     def __init__(self, config: ProviderConfig):
         if not config.api_key:
             raise ProviderInitializationError("qwen API Key 未设置，请检查api")
@@ -63,13 +64,13 @@ class QWENProvider:
                 model=model_name,
                 dashscope_api_key=self.config.api_key,
                 max_retries=1,
-
             )
 
 
 class OllamaProvider:
     """ Ollama供应商类, 创建客户端."""
     supported_models_chat = ["qwen3.5:9b"]
+    vision_models = ["qwen3-vl:2b", "gemma3:4b"]
     supported_models_embed = ["qwen3-embedding:8b"]
 
     def __init__(self, config: ProviderConfig):
@@ -77,7 +78,9 @@ class OllamaProvider:
 
     def get_client(self, model_name: str) -> BaseChatModel | OllamaEmbeddings:
         """ 获取模型客户端。"""
-        if model_name not in self.supported_models_chat and model_name not in self.supported_models_embed:
+        if (model_name not in self.supported_models_chat
+                and model_name not in self.supported_models_embed
+                and model_name not in self.vision_models):
             raise ModelNotSupportedError(
                 f"模型 {model_name} 不是本地模型, 仅支持模型: {self.supported_models_chat}, {self.supported_models_embed}")
         if model_name in self.supported_models_chat:
@@ -88,15 +91,23 @@ class OllamaProvider:
                 timeout=self.coning.timeout,
                 temperature=self.coning.temperature
             )
-        else:
+        elif model_name in self.supported_models_embed:
             log.info(f" [LLM] 创建 Ollama 嵌入模型客户端, 使用本地模型: {model_name}")
             return OllamaEmbeddings(
                 model=model_name,
                 base_url=self.coning.base_url,
                 client_kwargs={"timeout": self.coning.timeout}
             )
+        else:
+            log.info(f" [LLM] 创建 Ollama 视觉模型客户端, 使用本地模型: {model_name}")
+            return OpenAI(
+                api_key="ollama",
+                base_url=f"{self.coning.base_url.rstrip('/')}/v1",
+                timeout=self.coning.timeout,
+            )
 
-# ==========  工厂核心 ================
+
+# ========== 工厂核心 ================
 
 class LLMFactory:
     """
@@ -125,6 +136,9 @@ class LLMFactory:
 
             if hasattr(provider_class, "supported_models_embed"):
                 all_models.extend(provider_class.supported_models_embed)
+
+            if hasattr(provider_class, "vision_models"):
+                all_models.extend(provider_class.vision_models)
 
             for model_name in all_models:
                 if model_name in self._routing:
@@ -160,8 +174,6 @@ class LLMFactory:
         """ 获取所有支持的模型列表"""
         return list(self._routing.keys())
 
-
-
     def add_provider(self, name: str, config_loader, provider_cls):
         """
         运行时添加新供应商（企业扩展用）
@@ -173,15 +185,12 @@ class LLMFactory:
             all_models.extend(provider_cls.supported_models_chat)
         if hasattr(provider_cls, "supported_models_embed"):
             all_models.extend(provider_cls.supported_models_embed)
+        if hasattr(provider_cls, "vision_models"):
+            all_models.extend(provider_cls.vision_models)
         for model in all_models:
             self._routing[model] = name
             self._client_cache.pop(model, None)
         log.info(f" [LLM] 动态添加供应商 {name} 添加成功，支持的模型为: {all_models}")
 
-# ==========  全局实例对象 ==========
+# ========== 全局实例对象 ==========
 llm_factory = LLMFactory()
-
-
-
-
-
