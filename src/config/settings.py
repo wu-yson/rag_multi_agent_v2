@@ -37,6 +37,12 @@ class AppSettings(BaseSettings):
     chroma_embedding_model: Optional[str] = "qwen3-embedding:8b"  # 嵌入模型
     chroma_search_top_k: int = 4  # 搜索相似度检索返回条数
 
+    # Milvus_Lite向量库 __
+    milvus_persist_path: Optional[str] = str(BASE_DIR / "src/db/cloud_milvus_db")  # 持久化路径
+    milvus_embedding_model: Optional[str] = "qwen3-embedding:8b"  # 嵌入模型
+    milvus_search_top_k: int = 4  # 搜索相似度检索返回条数
+
+
 
     # faiss向量库 __
     faiss_persist_path: str = str(BASE_DIR /"src/db/cloud_faiss_db")  # 持久化路径
@@ -45,9 +51,9 @@ class AppSettings(BaseSettings):
     faiss_meta_path: str = str(BASE_DIR / "src/db/cloud_faiss_db/file_meta.json")   # 元数据存储路径
 
     # rag链路 __
-    rag_vector_store_name: str = "chroma"   # 当前使用向量库
+    rag_vector_store_name: str = "milvus"   # 当前使用向量库
     rag_chat_model: Optional[str] = "qwen3.5:9b"   # 对话模型
-    rag_vision_model:  str  = "qwen3-vl:2b"
+    rag_vision_model:  str  = "gemma3:4b"    # 多模态模型
     rag_data_path: str = ""
 
     # 通用agent __

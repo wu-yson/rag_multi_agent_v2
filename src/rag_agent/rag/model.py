@@ -39,6 +39,18 @@ class LoaderNotFoundException(Exception):
 # 配置数据类
 # ======================================================================
 
+
+
+@dataclass
+class MilvusLiteVectorConfig:
+    """Chroma向量存储配置。"""
+    persist_path: Optional[str]
+    embedding_model: Optional[str]
+    search_top_k: int
+
+
+
+
 @dataclass
 class ChromaVectorConfig:
     """Chroma向量存储配置。"""
