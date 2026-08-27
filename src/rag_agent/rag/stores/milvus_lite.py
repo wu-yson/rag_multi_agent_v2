@@ -48,6 +48,7 @@ class MilvusLiteStore(VectorStoreProvider):
             embedding_function=llm_factory.get_client(self._embedding),
             builtin_function=BM25BuiltInFunction(),  # BM25检索
             vector_field=["dense", "sparse"],   # 双路检索 稠密 + 稀疏双路
+
             # BRUTE_FORCE 避免 Windows 中文路径下 FAISS 落盘失败。
             index_params=[
                 {"index_type": "BRUTE_FORCE", "metric_type": "COSINE", "params": {}},
