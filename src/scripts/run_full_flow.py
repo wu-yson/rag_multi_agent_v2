@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-
+import asyncio
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -17,16 +17,16 @@ test_memory = CommonMemory(session_id="test_session_id_001")
 si_agent = SupervisorAgent(memory=test_memory)
 
 
-def run_test():
+async def run_test():
 
     while True:
         question = input("请输出内容")
         if question == "end" :
             break
-        result = si_agent.invoke(question)
+        result = await si_agent.ainvoke(question)
         print("===== 完整链路输出结果 =====")
         print(result)
 
 
 if __name__ == "__main__":
-    run_test()
+    asyncio.run( run_test() )

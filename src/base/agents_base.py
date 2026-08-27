@@ -97,7 +97,7 @@ class BaseAgentTemplate:
         raise NotImplementedError("子类需要实现 _get_error_tip 方法")
 
 
-    def _invoke_core(self, messages: List[Any]) -> str:
+    async def _invoke_core(self, messages: List[Any]) -> str:
         """
         通用推理执行外壳，统一异常捕获
         :param messages: 消息列表，由子类自行组装传入
@@ -106,7 +106,7 @@ class BaseAgentTemplate:
         log.info(f"[SubAgentInner][{self.output_key}] 开始调用Agent推理")
         try:
             agent = self.default_agent
-            resp = agent.invoke({"messages": messages})
+            resp = await agent.ainvoke({"messages": messages})
             msg_list = resp["messages"]
             last_msg = msg_list[-1]
 
@@ -131,7 +131,7 @@ class BaseAgentTemplate:
                 raise RuntimeError(f"Agent执行异常: {str(e)}")
             return self._get_error_tip()
 
-    def invoke_wrapper(self, state: GraphState) -> GraphState:
+    async def ainvoke_wrapper(self, state: GraphState) -> GraphState:
         """ 子Agent任务入口：从图状态取当前任务、执行并回写 agent_outputs。 """
         log.info(f"[SubAgentInner][{self.output_key}] 进入子Agent任务执行流程")
         task_messages = state.get("task_messages") or {}
@@ -156,7 +156,7 @@ class BaseAgentTemplate:
             HumanMessage(content=task_content),
         ]
         try:
-            result_text = self._invoke_core(messages)
+            result_text = await self._invoke_core(messages)
         except Exception as e:
             log.error(f"[SubAgentInner][{self.output_key}] 子Agent执行异常：{e}", exc_info=True)
             state["agent_outputs"] = {

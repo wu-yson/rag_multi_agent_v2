@@ -6,6 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
+from watchfiles import awatch
+
 from src.base.agents_base import GraphState, BaseAgentConfig
 from src.llm.factory import llm_factory
 from src.prompts import get_prompt
@@ -34,8 +36,8 @@ class MultiAgentWorkflow:
         """
         if self._compiled:
             raise RuntimeError("图谱编译完成后无法注册子智能体")
-        if not hasattr(agent_ins, "invoke_wrapper"):
-            raise AttributeError(f"agent{node_name} 缺少 invoke_wrapper 方法")
+        if not hasattr(agent_ins, "ainvoke_wrapper"):
+            raise AttributeError(f"agent{node_name} 缺少 ainvoke_wrapper 方法")
 
         self.sub_agents[node_name] = agent_ins
 
@@ -85,13 +87,13 @@ class MultiAgentWorkflow:
     def _make_supervisor_node(self):
         """ 主节点流程：由图内 LLM 从剩余任务中选择下一步。 """
 
-        def supervisor_core(state: GraphState) -> Dict[str, Any]:
+        async def supervisor_core(state: GraphState) -> Dict[str, Any]:
             task_messages = state.get("task_messages") or {}
             if not task_messages:
                 log.info("[Supervisor] 没有任务，结束流程")
                 return {"next_node": "END"}
 
-            selected = self._select_next_task(state, task_messages)
+            selected = await self._select_next_task(state, task_messages)
             if selected is None:
                 return {"next_node": "END"}
 
@@ -134,7 +136,7 @@ class MultiAgentWorkflow:
                 block.append(f"task {task_id} 执行结果：{item.get('result', '')}")
         return "\n".join(block)
 
-    def _select_next_task(
+    async def _select_next_task(
             self,
             state: GraphState,
             task_messages: Dict[str, Dict[str, Any]],
@@ -170,7 +172,7 @@ class MultiAgentWorkflow:
             agent_outputs=agent_outputs_text,
         )
 
-        resp = self._llm.invoke(messages)
+        resp = await self._llm.ainvoke(messages)
         choice = str(resp.content).strip()
         log.info(f"[Supervisor] 图内LLM下一步任务ID：{choice}")
 
@@ -192,12 +194,12 @@ class MultiAgentWorkflow:
 
     def _wrap_sub_agent_node(self, agent_ins: Any, node_name: str):
         """ 子智能体节点流程 """
-        def sub_node(state: GraphState) -> GraphState:
+        async def sub_node(state: GraphState) -> GraphState:
             log.info(f"[SubAgent] 开始执行子节点：{node_name}")
-            return agent_ins.invoke_wrapper(state)
+            return await agent_ins.ainvoke_wrapper(state)
         return sub_node
 
-    def invoke(self, **kwargs) -> GraphState:
+    async def ainvoke(self, **kwargs) -> GraphState:
         """
         图对外调用唯一接口
         :param kwargs: 其他自定义状态字段
@@ -213,7 +215,7 @@ class MultiAgentWorkflow:
             "runtime_task_inputs": [],
             **kwargs
         }
-        return self._graph.invoke(init_state)
+        return await self._graph.ainvoke(init_state)
 
     def build(self) -> None:
         """ 获取流程图 """
@@ -239,7 +241,7 @@ class GraphInvokeTool(BaseTool):
         "文档入库、知识库检索必须用 target_agent=rag_agent；本地文件读写、生成Word/Excel/Txt必须用 target_agent=doc_agent。"
     )
 
-    def _run(self, workflow_json: str) -> str:
+    async def _arun(self, workflow_json: str) -> str:
         try:
             if isinstance(workflow_json, str):
                 try:
@@ -270,7 +272,7 @@ class GraphInvokeTool(BaseTool):
 
         try:
             log.info(f"[GraphTool] 主Agent拆解任务：{json.dumps(plan, ensure_ascii=False)}")
-            graph_state = agents_graph.invoke(task_messages=normalized_tasks)
+            graph_state = await agents_graph.ainvoke(task_messages=normalized_tasks)
 
             summary_parts = [
                 "========== 多子Agent工作流执行结果汇总 ==========",
@@ -286,6 +288,9 @@ class GraphInvokeTool(BaseTool):
         except Exception as e:
             log.error(f"[GraphTool] 多Agent工作流执行异常，错误信息：{str(e)}", exc_info=True)
             raise
+
+    def _run(self, workflow_json: str) -> str:
+        raise NotImplementedError("graph_invoke 仅支持异步调用")
 
 # 注册工具实例
 graph_invoke = GraphInvokeTool()

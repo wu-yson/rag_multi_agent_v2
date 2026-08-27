@@ -93,7 +93,7 @@ class SupervisorAgent(BaseAgentTemplate):
         msg_list.append(HumanMessage(content=user_input))
         return msg_list
 
-    def _security_detect(self, user_input: str) -> bool:
+    async def _security_detect(self, user_input: str) -> bool:
         """ 提示词攻击安全检测"""
         detect_prompt = get_prompt("prompt_injection_detect_prompt")
         messages = [
@@ -101,7 +101,7 @@ class SupervisorAgent(BaseAgentTemplate):
             HumanMessage(content=user_input)
         ]
         # 调用LLM获取判定结果
-        resp = self.llm.invoke(messages)
+        resp = await self.llm.ainvoke(messages)
         raw_content = resp.content.strip()
 
         try:
@@ -119,7 +119,7 @@ class SupervisorAgent(BaseAgentTemplate):
 
 
 
-    def invoke(
+    async def ainvoke(
         self,
         user_input: str,
         history: Optional[list[BaseMessage]] = None,
@@ -140,7 +140,7 @@ class SupervisorAgent(BaseAgentTemplate):
         """
         try:
             # 前置安全检测
-            is_attack = self._security_detect(user_input)
+            is_attack = await self._security_detect(user_input)
             if is_attack:
                 intercept_text = "此为攻击行为, 结束此次会话"
                 return intercept_text
@@ -151,7 +151,7 @@ class SupervisorAgent(BaseAgentTemplate):
 
             agent = self._get_agent(tmp_model, tmp_tools, tmp_prompt)
             log.info(f"[TopSupervisor] 开始构建主层Agent")
-            resp = agent.invoke({"messages": messages})
+            resp = await agent.ainvoke({"messages": messages})
             msg_list = resp["messages"]
             last_msg = msg_list[-1]
             reply = last_msg.content
@@ -186,7 +186,7 @@ class SupervisorAgent(BaseAgentTemplate):
             return f"智能体调用失败: {e}"
 
 
-    def invoke_wrapper(self, state: GraphState) -> GraphState:
+    def ainvoke_wrapper(self, state: GraphState) -> GraphState:
         raise RuntimeError("顶层主Agent不作为LangGraph节点调用，该方法禁止执行")
 
     def _get_error_tip(self) -> str:

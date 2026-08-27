@@ -9,7 +9,7 @@ from src.utils.logger import log
 router = APIRouter()
 
 @router.post("/chat")
-def chat_api(body: ChatBody):
+async def chat_api(body: ChatBody):
     """ 对话接口 """
     question = body.query
     sid = body.session_id
@@ -17,7 +17,7 @@ def chat_api(body: ChatBody):
         # 每次请求新建内存、agent，会话隔离
         memory = CommonMemory(session_id=sid)
         agent = SupervisorAgent(memory=memory)
-        resp = agent.invoke(question)
+        resp = await agent.ainvoke(question)
 
         return {
             "code": 200,
