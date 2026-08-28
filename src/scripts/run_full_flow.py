@@ -4,6 +4,10 @@ import sys
 from pathlib import Path
 import asyncio
 
+from src.doc_agent.document_agent import doc_agent
+from src.mcp.client import close
+from src.rag_agent.rag_agent import rag_agent
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(BASE_DIR))
@@ -27,6 +31,15 @@ async def run_test():
         print("===== 完整链路输出结果 =====")
         print(result)
 
+async def main():
+    d = await doc_agent.get_agent()
+    r = await rag_agent.get_agent()
+    print("doc agent 创建成功 | rag agent 创建成功")
+    await close()
+
+
+
 
 if __name__ == "__main__":
-    asyncio.run( run_test() )
+    # asyncio.run( run_test() )
+    asyncio.run(main())

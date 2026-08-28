@@ -1,8 +1,9 @@
 
 from typing import Any
+
+from src.mcp.client import get_rag_tools
 from src.prompts import get_prompt
 from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, NodeKeyBase
-from src.rag_agent.rag_tool import document_storage, rag_search
 from src.supervisor_agent.graph_tool.graph import agents_graph
 
 
@@ -24,11 +25,10 @@ class RAGAgent(BaseAgentTemplate):
             self._system_prompt = get_prompt("rag_agent_prompt")
         return self._system_prompt
 
-    @property
-    def tools(self) -> list[Any]:
-        if self._tools is None:
-            self._tools = [rag_search, document_storage]
-        return self._tools
+    async def _load_tools(self):
+        """rag 工具从 MCP 加载"""
+        return await get_rag_tools()
+
 
     @property
     def output_key(self) -> str:

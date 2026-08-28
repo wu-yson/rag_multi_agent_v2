@@ -75,6 +75,24 @@ class BaseAgentTemplate:
         """
         raise NotImplementedError("子类必须重写，实现自身工具实例的加载与组装")
 
+    async def _load_tools(self):
+        """加载工具：默认用本地 tools 属性；子类可覆写为 MCP 加载"""
+        return self.tools
+
+    async def get_agent(self):
+        """异步获取 agent：先加载工具（可能来自 MCP），再创建"""
+        if self._default_agent is None:
+            tools = await self._load_tools()
+            self._default_agent = create_agent(
+                model=self.llm,
+                system_prompt=self.system_prompt,
+                tools=tools,
+                middleware=[],
+            )
+        return self._default_agent
+
+
+
     @property
     def default_agent(self):
         """ 懒加载拼装langchain原生Agent执行实例 """
@@ -105,7 +123,7 @@ class BaseAgentTemplate:
         """
         log.info(f"[SubAgentInner][{self.output_key}] 开始调用Agent推理")
         try:
-            agent = self.default_agent
+            agent = await self.get_agent()
             resp = await agent.ainvoke({"messages": messages})
             msg_list = resp["messages"]
             last_msg = msg_list[-1]

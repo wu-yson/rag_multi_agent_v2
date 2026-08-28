@@ -6,7 +6,7 @@ doc_agent_prompt = """
 - 读取任务：按需调用 read_file、read_docx、read_xlsx 等读取工具。
 - 写入任务：按需调用 write_file、write_docx、write_xlsx 等写入工具。
 - 如果任务要求写入但当前没有可写入内容，如实说明缺少内容，不要编造。
-- 不确定工具用法时调用 get_doc_agent_skill。
+
 
 【输入】
 只读取当前任务内容，以及任务中提供的前置结果。
