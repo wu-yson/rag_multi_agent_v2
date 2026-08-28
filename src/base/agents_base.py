@@ -70,13 +70,12 @@ class BaseAgentTemplate:
     @property
     def tools(self) -> list[Any]:
         """
-        父类仅做接口约束：返回当前Agent可用的工具实例列表
-        加载逻辑、来源、筛选全部由子类自主实现
+        加载工具
         """
         raise NotImplementedError("子类必须重写，实现自身工具实例的加载与组装")
 
     async def _load_tools(self):
-        """加载工具：默认用本地 tools 属性；子类可覆写为 MCP 加载"""
+        """加载mcp工具：默认用本地 tools 属性；子类可覆写为 MCP 加载"""
         return self.tools
 
     async def get_agent(self):

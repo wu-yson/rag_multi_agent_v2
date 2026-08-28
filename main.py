@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 import uvicorn
@@ -11,9 +12,14 @@ sys.path.insert(0, str(BASE_DIR))
 from src.api.api_root import api_router
 
 
+@asynccontextmanager
+async def lifespan(app):
+    yield                                    # 应用运行期间
+    from src.mcp.client import close
+    await close()
 
 # 创建服务实例
-app = FastAPI(title="多智能体服务")
+app = FastAPI(title="多智能体服务", lifespan=lifespan)
 app.include_router(api_router, prefix="/api")
 
 if __name__ == "__main__":
