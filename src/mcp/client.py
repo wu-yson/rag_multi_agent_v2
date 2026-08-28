@@ -14,7 +14,7 @@ class MCPUnavailableError(RuntimeError):
 
 
 
-
+_tools_lock = asyncio.Lock()
 
 SERVER_PARAMS = StdioServerParameters(
     command="python",
@@ -29,21 +29,22 @@ async def get_tools():
     global _exit_stack, _tools
     if _tools is not None:
         return _tools
-    try:
-        _exit_stack = AsyncExitStack()  # 常驻
-        # stdio_client mcp 进程, 双向通道
-        read, write = await _exit_stack.enter_async_context(stdio_client(SERVER_PARAMS))
-        # ClientSession mcp 发请求 收响应
-        session = await _exit_stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        # load_mcp_tools 变成工具
-        _tools = await load_mcp_tools(session)
-        return _tools  # 全局缓存
-    except Exception as e:
-        log.error(f"MCP 服务连接失败: {e}")
-        raise MCPUnavailableError(
-            "MCP 工具服务未启动或连接失败，请先启动 MCP 服务"
-        ) from e
+
+    async with _tools_lock:                       # 锁在最外层
+        if _tools is not None:                    # 双检
+            return _tools
+        try:
+            _exit_stack = AsyncExitStack()
+            read, write = await _exit_stack.enter_async_context(stdio_client(SERVER_PARAMS))
+            session = await _exit_stack.enter_async_context(ClientSession(read, write))
+            await session.initialize()
+            _tools = await load_mcp_tools(session)
+            return _tools
+        except Exception as e:
+            log.error(f"MCP 服务连接失败: {e}")
+            raise MCPUnavailableError(
+                "MCP 工具服务未启动或连接失败，请先启动 MCP 服务"
+            ) from e
 
 async def close():
     """关闭 MCP 连接（用完调用）"""

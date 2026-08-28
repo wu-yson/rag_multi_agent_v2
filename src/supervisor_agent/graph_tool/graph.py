@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import json
 
 from typing import Any, Dict
@@ -54,150 +55,60 @@ class MultiAgentWorkflow:
         """ 图流程构建 """
         workflow = StateGraph(GraphState)
         workflow.add_node("supervisor", self._make_supervisor_node())
-        log.info("[GraphInit]已注册主节点: supervisor ")
-        for node_name, agent_ins in self.sub_agents.items():
-            workflow.add_node(node_name, self._wrap_sub_agent_node(agent_ins, node_name))
-            log.info(f"[GraphInit]已注册子节点: {node_name} ")
         workflow.set_entry_point("supervisor")
-
-        def route_func(state: GraphState) -> str:
-            """ 条件判断 是否继续执行 或者结束 """
-            target: str = state.get("next_node", "END")
-            valid_agent_names = [k.lower() for k in self.sub_agents.keys()]
-            target_low = target.lower()
-            log.info(f"[Route] LLM输出目标原始节点值：{target}，小写处理：{target_low}")
-            if target_low in valid_agent_names:
-                return target_low
-            elif target.upper() == "END":
-                return "END"
-            log.warning(f"[Route] 未知节点名称[{target}]，兜底执行结束流程")
-            return "END"
-
-        workflow.add_conditional_edges(
-            source="supervisor",
-            path=route_func,
-            path_map={**{k:k for k in self.sub_agents.keys()}, "END": END}
-        )
-        for node_name in self.sub_agents.keys():
-            workflow.add_edge(node_name, "supervisor")
+        workflow.add_edge("supervisor", END)  # 调度都在 supervisor 内部完成
         compiled = workflow.compile()
-        log.info("[GraphInit] 工作流构建编译完成 ")
+        log.info("[GraphInit] 依赖驱动调度图构建完成")
         return compiled
 
-    def _make_supervisor_node(self):
-        """ 主节点流程：由图内 LLM 从剩余任务中选择下一步。 """
+    async def _execute_all(self, state):
+        """依赖驱动调度：谁的前置完成谁立刻跑"""
+        task_messages = state.get("task_messages", {})
+        outputs = state.get("agent_outputs", {})
+        started = set()
 
+        def deps_satisfied(tid):
+            task = task_messages[tid]
+            return all(str(d) in outputs for d in (task.get("depends_on") or []))
+
+        async def run_one(tid):
+            task = task_messages[tid]
+            sub_state = dict(state)
+            sub_state["current_task_id"] = str(tid)
+            sub_state["runtime_task_inputs"] = [
+                f"[前置任务 {dep} 结果]\n{outputs.get(str(dep), {}).get('result', '')}"
+                for dep in (task.get("depends_on") or [])
+            ]
+            result_state = await self.sub_agents[task["target_agent"]].ainvoke_wrapper(sub_state)
+            outputs[str(tid)] = result_state["agent_outputs"][str(tid)]
+
+        running = set()
+        while True:
+            for tid in task_messages:
+                if tid not in started and deps_satisfied(tid):
+                    started.add(tid)
+                    running.add(asyncio.create_task(run_one(tid)))
+            if not running:
+                break
+            done, running = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+        return outputs
+
+
+
+    def _make_supervisor_node(self):
+        """ 主节点流程 """
         async def supervisor_core(state: GraphState) -> Dict[str, Any]:
             task_messages = state.get("task_messages") or {}
             if not task_messages:
                 log.info("[Supervisor] 没有任务，结束流程")
                 return {"next_node": "END"}
-
-            selected = await self._select_next_task(state, task_messages)
-            if selected is None:
-                return {"next_node": "END"}
-
-            task_id, task = selected
-            agent_outputs = state.get("agent_outputs", {})
-            runtime_task_inputs = [
-                f"[前置任务 {dep} 结果]\n{agent_outputs.get(str(dep), {}).get('result', '')}"
-                for dep in (task.get("depends_on") or [])
-            ]
-            return {
-                "next_node": task["target_agent"],
-                "current_task_id": str(task_id),
-                "runtime_task_inputs": runtime_task_inputs,
-            }
-
+            outputs = await self._execute_all(state)
+            return {"agent_outputs": outputs, "next_node": "END"}
         return supervisor_core
 
-    @staticmethod
-    def _format_task_list(tasks: list[tuple[str, dict[str, Any]]]) -> str:
-        """统一格式化待执行任务文本，抽离渲染逻辑"""
-        block = []
-        for task_id, task in tasks:
-            target_agent = task.get("target_agent")
-            content = task.get("task_content")
-            depends_on = task.get("depends_on", [])
-            block.append(f"task {task_id} | target_agent={target_agent} | depends_on={depends_on} | 任务内容：{content}")
-        return "\n".join(block)
 
-    @staticmethod
-    def _format_result_dict(agent_outputs: Dict[str, Dict[str, str]]) -> str:
-        """统一格式化已完成任务结果"""
-        if not agent_outputs:
-            return "暂无任何已完成任务输出"
-        block = []
-        for task_id in sorted(agent_outputs.keys(), key=lambda x: int(x) if x.isdigit() else x):
-            item = agent_outputs[task_id]
-            if item.get("error"):
-                block.append(f"task {task_id} 执行失败：{item['error']}")
-            else:
-                block.append(f"task {task_id} 执行结果：{item.get('result', '')}")
-        return "\n".join(block)
 
-    async def _select_next_task(
-            self,
-            state: GraphState,
-            task_messages: Dict[str, Dict[str, Any]],
-    ) -> tuple[str, Dict[str, Any]] | None:
-        """ 图内 LLM 按主Agent计划输出下一个待执行 task_id。 """
-        agent_outputs = state.get("agent_outputs", {})
-        if any(item.get("error") for item in agent_outputs.values()):
-            log.warning("[Supervisor] 存在子Agent执行失败结果，终止调度")
-            return None
 
-        ready_tasks = [
-            (str(task_id), task)
-            for task_id, task in task_messages.items()
-            if str(task_id) not in agent_outputs
-            and all(
-                str(dep) in agent_outputs
-                for dep in (task.get("depends_on") or [])
-            )
-        ]
-        if not ready_tasks:
-            return None
-
-        if len(ready_tasks) == 1:
-            return ready_tasks[0]
-
-        remaining_tasks = self._format_task_list(ready_tasks)
-        agent_outputs_text = self._format_result_dict(agent_outputs)
-
-        messages = ChatPromptTemplate.from_messages([
-            ("system", get_prompt("graph_prompt")),
-        ]).format_messages(
-            remaining_tasks=remaining_tasks,
-            agent_outputs=agent_outputs_text,
-        )
-
-        resp = await self._llm.ainvoke(messages)
-        choice = str(resp.content).strip()
-        log.info(f"[Supervisor] 图内LLM下一步任务ID：{choice}")
-
-        if choice.upper() == "END":
-            return None
-
-        selected = next(
-            (
-                item for item in ready_tasks
-                if item[0] == choice
-            ),
-            None,
-        )
-        # LLM输出task_id不在ready任务中，直接终止流程
-        if selected is None:
-            log.warning(f"[Supervisor] LLM输出[{choice}] 不在ready任务ID中，终止调度")
-            return None
-        return selected
-
-    def _wrap_sub_agent_node(self, agent_ins: Any, node_name: str):
-        """ 子智能体节点流程 """
-        async def sub_node(state: GraphState) -> GraphState:
-            log.info(f"[SubAgent] 开始执行子节点：{node_name}")
-            return await agent_ins.ainvoke_wrapper(state)
-        return sub_node
 
     async def ainvoke(self, **kwargs) -> GraphState:
         """
