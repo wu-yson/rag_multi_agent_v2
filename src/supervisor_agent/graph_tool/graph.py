@@ -1,18 +1,14 @@
 import ast
 import asyncio
 import json
-
 from typing import Any, Dict
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
-from watchfiles import awatch
-
-from src.base.agents_base import GraphState, BaseAgentConfig
-from src.llm.factory import llm_factory
-from src.prompts import get_prompt
+from src.base.agents_base import GraphState
 from src.utils.logger import log
+
+
 
 
 class MultiAgentWorkflow:
@@ -26,7 +22,7 @@ class MultiAgentWorkflow:
         self.sub_agents: Dict[str, Any] = {}
         self._graph = None
         self._compiled = False
-        self._llm = llm_factory.get_client(BaseAgentConfig().default_model)
+
 
 
     def register_sub_agent(self, node_name: str, agent_ins: Any) -> None:
