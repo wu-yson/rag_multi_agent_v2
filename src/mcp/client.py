@@ -37,14 +37,16 @@ async def get_tools():
             _exit_stack = AsyncExitStack()
             read, write = await _exit_stack.enter_async_context(stdio_client(SERVER_PARAMS))
             session = await _exit_stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-            _tools = await load_mcp_tools(session)
+            await asyncio.wait_for(session.initialize(), timeout=60)
+            _tools = await asyncio.wait_for(load_mcp_tools(session), timeout=60)
             return _tools
         except Exception as e:
             log.error(f"MCP 服务连接失败: {e}")
+            _exit_stack = None  # 新增：清掉，避免 close() 重复关闭已取消的连接
+            _tools = None
             raise MCPUnavailableError(
-                "MCP 工具服务未启动或连接失败，请先启动 MCP 服务"
-            ) from e
+                    "MCP 工具服务未启动或连接失败，请先启动 MCP 服务"
+                ) from e
 
 async def close():
     """关闭 MCP 连接（用完调用）"""

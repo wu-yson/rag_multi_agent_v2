@@ -8,7 +8,7 @@ from langgraph.graph.state import CompiledStateGraph
 from src.base.agents_base import GraphState
 from src.utils.logger import log
 
-
+SUB_AGENT_TIMEOUT = 300
 
 
 class MultiAgentWorkflow:
@@ -75,9 +75,19 @@ class MultiAgentWorkflow:
                 f"[前置任务 {dep} 结果]\n{outputs.get(str(dep), {}).get('result', '')}"
                 for dep in (task.get("depends_on") or [])
             ]
-            result_state = await self.sub_agents[task["target_agent"]].ainvoke_wrapper(sub_state)
-            outputs[str(tid)] = result_state["agent_outputs"][str(tid)]
-
+            try:
+                result_state = await asyncio.wait_for(
+                    self.sub_agents[task["target_agent"]].ainvoke_wrapper(sub_state),
+                    timeout=SUB_AGENT_TIMEOUT,
+                )
+                outputs[str(tid)] = result_state["agent_outputs"][str(tid)]
+            except asyncio.TimeoutError:
+                log.error(f"[Graph] 子agent {task['target_agent']} 任务{tid} 超时")
+                outputs[str(tid)] = {
+                    "target_agent": task['target_agent'],
+                    "result": "",
+                    "error": f"子Agent执行超时（>{SUB_AGENT_TIMEOUT}秒）"
+                }
         running = set()
         while True:
             for tid in task_messages:
@@ -101,8 +111,6 @@ class MultiAgentWorkflow:
             outputs = await self._execute_all(state)
             return {"agent_outputs": outputs, "next_node": "END"}
         return supervisor_core
-
-
 
 
 

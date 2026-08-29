@@ -1,3 +1,5 @@
+import asyncio
+
 from src.utils.logger import log
 from dataclasses import dataclass
 from typing import Optional, List, Any, Dict, TypedDict
@@ -124,6 +126,7 @@ class BaseAgentTemplate:
         try:
             agent = await self.get_agent()
             resp = await agent.ainvoke({"messages": messages})
+
             msg_list = resp["messages"]
             last_msg = msg_list[-1]
 
