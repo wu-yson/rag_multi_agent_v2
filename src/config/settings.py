@@ -37,5 +37,11 @@ class AppSettings(BaseSettings):
     agent_default_model: Optional[str] = "qwen3.5:9b"  # 所有agent使用模型
     agent_debug_mode: bool = True  # 调试模式
 
+    # mcp配置__
+    mcp_server_path: str = ""
+
+    # 模型回退链 __
+    model_fallback_chain: list[str] = ["qwen3.7-flash"]
+
 
 settings = AppSettings()

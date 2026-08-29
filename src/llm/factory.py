@@ -1,6 +1,7 @@
 from typing import Any
 
 from src.config.settings import settings
+from src.llm.resilience import ResilientChatModel
 from src.utils.logger import log
 from langchain_openai import ChatOpenAI
 from langchain_community.embeddings import DashScopeEmbeddings
@@ -123,27 +124,24 @@ class LLMFactory:
         }
         self._routing: dict[str, str] = {}
         self._client_cache: dict[str, Any] = {}
+        self._model_types: dict[str, str] = {}
         self._build_routing()
+
 
     def _build_routing(self):
         """从每个供应商的 supported_models 构建路由表"""
         self._routing.clear()
-
-        for providers_name, (_, provider_class) in self._providers.items():
-            all_models = []
-            if hasattr(provider_class, "supported_models_chat"):
-                all_models.extend(provider_class.supported_models_chat)
-
-            if hasattr(provider_class, "supported_models_embed"):
-                all_models.extend(provider_class.supported_models_embed)
-
-            if hasattr(provider_class, "vision_models"):
-                all_models.extend(provider_class.vision_models)
-
-            for model_name in all_models:
-                if model_name in self._routing:
-                    log.warning(f" [LLM] 模型 {model_name} 已被 {self._routing[model_name]} 注册，将被覆盖")
-                self._routing[model_name] = providers_name
+        self._model_types.clear()
+        for provider_name, (_, provider_class) in self._providers.items():
+            for model_name in getattr(provider_class, "supported_models_chat", []):
+                self._routing[model_name] = provider_name
+                self._model_types[model_name] = "chat"
+            for model_name in getattr(provider_class, "supported_models_embed", []):
+                self._routing[model_name] = provider_name
+                self._model_types[model_name] = "embed"
+            for model_name in getattr(provider_class, "vision_models", []):
+                self._routing[model_name] = provider_name
+                self._model_types[model_name] = "vision"
         log.info(f" [LLM] 工厂路由表构建完成，共 {len(self._routing)} 个模型")
 
     def get_client(self, model_name: str) -> BaseChatModel | Embeddings:
@@ -160,6 +158,15 @@ class LLMFactory:
             coning = config_loader()
             provider = provider_cls(coning)
             client = provider.get_client(model_name)
+            if isinstance(client, BaseChatModel):
+                client = ResilientChatModel(
+                    inner=client,
+                    model_name=model_name,
+                    fallback_models=list(settings.model_fallback_chain),
+                ).with_retry(
+                    stop_after_attempt=2,
+                    retry_if_exception_type=(TimeoutError, ConnectionError),
+                )
             self._client_cache[model_name] = client
             return client
         except ProviderInitializationError as e:
@@ -169,14 +176,19 @@ class LLMFactory:
             log.error(f" [LLM] 创建客户端失败: {e}")
             raise ProviderInitializationError(f"无法创建 {provider_name} 客户端: {e}")
 
+
     # 工具函数,可写可不写
-    def get_supported_models(self) -> list[str]:
-        """ 获取所有支持的模型列表"""
-        return list(self._routing.keys())
+    def get_supported_models(self, model_types: list[str] | None = None) -> list[str]:
+        """ 获取支持的模型列表
+        :param model_types: 按类型过滤，如 ["chat"] 或 ["chat","vision"]；不传返回全部
+        """
+        if model_types is None:
+            return list(self._routing.keys())
+        return [m for m, t in self._model_types.items() if t in model_types]
 
     def add_provider(self, name: str, config_loader, provider_cls):
         """
-        运行时添加新供应商（企业扩展用）
+        运行时添加新供应商
         前置需求, 要先写好加载配置函数和对应的供应商类, 才能调用这个函数
         """
         self._providers[name] = (config_loader, provider_cls)

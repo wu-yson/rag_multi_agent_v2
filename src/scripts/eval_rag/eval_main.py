@@ -89,6 +89,11 @@ def run_eval(rag_factory, llm_factory):
 
 
 if __name__ == "__main__":
-    from src.rag_agent.rag.factory import rag_factory
+    import sys
+    from pathlib import Path
+    from src.config.settings import settings
+
+    sys.path.insert(0, str(Path(settings.mcp_server_path).parent))
+    from mcp_src.rag_tool.rag.factory import rag_factory
     from src.llm.factory import llm_factory
     run_eval(rag_factory, llm_factory)

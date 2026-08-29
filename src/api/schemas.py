@@ -5,6 +5,7 @@ from pydantic import BaseModel
 class ChatBody(BaseModel):
     query: str
     session_id: str
+    model: str | None = None
 
 # 当前记忆接口专属请求体
 class MemoryClearBody(BaseModel):

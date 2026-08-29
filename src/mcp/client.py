@@ -5,21 +5,26 @@ from src.utils.logger import log
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
-
-
+from src.config.settings import settings
 
 class MCPUnavailableError(RuntimeError):
     """MCP 服务不可用时抛出"""
     pass
 
 
+if not settings.mcp_server_path:
+    raise MCPUnavailableError("未配置 MCP_SERVER_PATH，请在 .env 中设置 MCP 服务端脚本路径")
+SERVER_PARAMS = StdioServerParameters(
+    command="python",
+    args=[settings.mcp_server_path],
+)
+
+
 
 _tools_lock = asyncio.Lock()
 
-SERVER_PARAMS = StdioServerParameters(
-    command="python",
-    args=[r"D:/python-xuexi/面试文件/MCP工具组件/mcp_tool_server/server.py"],
-)
+
+
 
 # 全局状态：会话只建一次，工具只加载一次
 _exit_stack: AsyncExitStack | None = None
