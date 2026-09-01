@@ -1,4 +1,6 @@
 from fastapi import APIRouter
+
+from src.api.conversation_router import router as conversation_router
 from src.api.chat_router import router as chat_router
 from src.api.memory_router import router as memory_router
 from src.api.health_router import router as health_router
@@ -9,3 +11,4 @@ api_router = APIRouter()
 api_router.include_router(chat_router)
 api_router.include_router(memory_router)
 api_router.include_router(health_router)
+api_router.include_router(conversation_router)

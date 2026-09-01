@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 # 固定路径，解决uvicorn导入问题
 BASE_DIR = Path(__file__).resolve().parent
@@ -21,6 +22,9 @@ async def lifespan(app):
 # 创建服务实例
 app = FastAPI(title="多智能体服务", lifespan=lifespan)
 app.include_router(api_router, prefix="/api")
+
+# 托管前端页面（web/ 目录），访问 http://127.0.0.1:8000/web/
+app.mount("/web", StaticFiles(directory="web", html=True), name="web")
 
 if __name__ == "__main__":
     uvicorn.run(

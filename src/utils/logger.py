@@ -66,6 +66,10 @@ class GlobalLogger:
     def error(self, msg: str, *args, **kwargs):
         self._logger.error(msg, *args, **kwargs)
 
+    def exception(self, msg: str, *args, **kwargs):
+        """记录异常及堆栈（等价于 error + exc_info=True）"""
+        self._logger.exception(msg, *args, **kwargs)
+
 # 全局单例，项目所有文件只导入这一个
 log = GlobalLogger()
 

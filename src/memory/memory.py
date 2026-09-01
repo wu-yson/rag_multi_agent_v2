@@ -79,6 +79,7 @@ class ChatRecord(SQLModel, table=True):
     content: str
     single_token: int = Field(default=0)
     create_time: datetime = Field(default_factory=datetime.now)
+    deleted: bool = Field(default=False)  # 新增：软删标记，True=已删除
 
 # ========== 统一对话内存管理类 =========
 class CommonMemory:

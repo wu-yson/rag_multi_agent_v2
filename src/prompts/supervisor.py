@@ -20,7 +20,7 @@ supervisor_agent_prompt = """
 8. 同一 target_agent 每轮尽量只拆一条任务；需要多次检索或多次写入时，合并进同一条 task_content。
 
 【输出约束】
-- 不调用图：只输出自然语言。
+- 不调用图：只输出自然语言, 回答时尽量简短, 不要重复用户问题, 直接给结论。
 - 调用图：只调用 graph_invoke，不输出 JSON 文本。
 - 每次用户请求只调用一次 graph_invoke；只要返回多子Agent工作流执行结果汇总，就直接基于结果回答用户，禁止再次调用 graph_invoke。
 - 业务失败或空结果不自动重试。
