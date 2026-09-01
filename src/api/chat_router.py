@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter
+from starlette.responses import StreamingResponse
 
 from src.api.schemas import ChatBody
 from src.llm.factory import llm_factory
@@ -17,27 +20,19 @@ async def list_models():
 
 
 
-@router.post("/chat")
+@router.post("/chat/stream")
 async def chat_api(body: ChatBody):
     """ 对话接口 """
-    question = body.query
-    sid = body.session_id
-    try:
-        # 每次请求新建内存、agent，会话隔离
-        memory = CommonMemory(session_id=sid)
-        agent = SupervisorAgent(memory=memory)
-        resp = await agent.ainvoke(question, tmp_model=body.model)
 
-        return {
-            "code": 200,
-            "msg": "ok",
-            "data": resp
-        }
-    except Exception as e:
-        log.exception("接口执行异常")
-        return {
-            "code": 500,
-            "msg": str(e),
-            "data": {}
-        }
+    async def event_generator():
+        try:
+            memory = CommonMemory(session_id=body.session_id)
+            agent = SupervisorAgent(memory=memory)
+            async for chunk in agent.astream(body.query, tmp_model=body.model):
+                yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            log.exception("流式接口异常")
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 

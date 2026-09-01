@@ -27,7 +27,10 @@ async def run_test():
         question = input("请输出内容")
         if question == "end" :
             break
-        result = await si_agent.ainvoke(question)
+        result_parts = []
+        async for chunk in si_agent.astream(question):
+            result_parts.append(chunk)
+        result = "".join(result_parts)
         print("===== 完整链路输出结果 =====")
         print(result)
 

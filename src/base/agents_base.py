@@ -1,5 +1,6 @@
 import asyncio
 
+from src.llm.resilience import build_agent_middleware
 from src.utils.logger import log
 from dataclasses import dataclass
 from typing import Optional, List, Any, Dict, TypedDict
@@ -88,7 +89,7 @@ class BaseAgentTemplate:
                 model=self.llm,
                 system_prompt=self.system_prompt,
                 tools=tools,
-                middleware=[],
+                middleware=build_agent_middleware(self.llm, llm_factory.get_client),
             )
         return self._default_agent
 
@@ -102,7 +103,7 @@ class BaseAgentTemplate:
                 model=self.llm,
                 system_prompt=self.system_prompt,
                 tools=self.tools,
-                middleware=[]
+                middleware=build_agent_middleware(self.llm, llm_factory.get_client),
             )
         return self._default_agent
 

@@ -1,7 +1,6 @@
 from typing import Any
 
 from src.config.settings import settings
-from src.llm.resilience import ResilientChatModel
 from src.utils.logger import log
 from langchain_openai import ChatOpenAI
 from langchain_community.embeddings import DashScopeEmbeddings
@@ -144,40 +143,32 @@ class LLMFactory:
                 self._model_types[model_name] = "vision"
         log.info(f" [LLM] 工厂路由表构建完成，共 {len(self._routing)} 个模型")
 
+
     def get_client(self, model_name: str) -> BaseChatModel | Embeddings:
-        """ 根据模型名称获取对应的供应商和客户端"""
-        if model_name in self._client_cache:  # 命中直接返回
+        """ 根据模型名称获取对应的提供商和客户端（裸客户端，弹性由 agent 中间件负责）"""
+        if model_name in self._client_cache:
             return self._client_cache[model_name]
 
         provider_name = self._routing.get(model_name)
         if not provider_name:
-            raise ModelNotSupportedError(f"模型 {model_name}不支持 ,支持列表为:{list(self._routing)}")
+            raise ModelNotSupportedError(f"模型 {model_name} 不支持，支持列表为:{list(self._routing)}")
 
         try:
             (config_loader, provider_cls) = self._providers[provider_name]
             coning = config_loader()
             provider = provider_cls(coning)
             client = provider.get_client(model_name)
-            if isinstance(client, BaseChatModel):
-                client = ResilientChatModel(
-                    inner=client,
-                    model_name=model_name,
-                    fallback_models=list(settings.model_fallback_chain),
-                ).with_retry(
-                    stop_after_attempt=2,
-                    retry_if_exception_type=(TimeoutError, ConnectionError),
-                )
             self._client_cache[model_name] = client
             return client
         except ProviderInitializationError as e:
-            log.error(f" [LLM] 供应商 {provider_name} 初始化失败: {e}")
+            log.error(f" [LLM] 提供商初始化失败: {e}")
             raise
         except Exception as e:
             log.error(f" [LLM] 创建客户端失败: {e}")
-            raise ProviderInitializationError(f"无法创建 {provider_name} 客户端: {e}")
+            raise ProviderInitializationError(f"无法创建 {model_name} 客户端: {e}")
 
 
-    # 工具函数,可写可不写
+    # 工具函数
     def get_supported_models(self, model_types: list[str] | None = None) -> list[str]:
         """ 获取支持的模型列表
         :param model_types: 按类型过滤，如 ["chat"] 或 ["chat","vision"]；不传返回全部

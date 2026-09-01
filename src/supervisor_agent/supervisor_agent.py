@@ -1,10 +1,11 @@
-import json
+﻿import json
 
+from src.llm.resilience import build_agent_middleware
 from src.utils.logger import log
 from typing import Optional, Any
 
 from langchain.agents import create_agent
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessageChunk
 
 from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, GraphState
 from src.llm.factory import llm_factory
@@ -56,7 +57,7 @@ class SupervisorAgent(BaseAgentTemplate):
             model=use_llm,
             system_prompt=use_prompt,
             tools=use_tools,
-            middleware=[]
+            middleware=build_agent_middleware(use_llm, llm_factory.get_client),
         )
 
     def _build_messages(
@@ -118,8 +119,7 @@ class SupervisorAgent(BaseAgentTemplate):
             return False
 
 
-
-    async def ainvoke(
+    async def astream(
         self,
         user_input: str,
         history: Optional[list[BaseMessage]] = None,
@@ -127,38 +127,34 @@ class SupervisorAgent(BaseAgentTemplate):
         tmp_model: Optional[str] = None,
         tmp_tools: Optional[list[Any]] = None,
         tmp_prompt: Optional[str] = None,
-    ) -> str:
-        """
-        调用智能体
-        :param user_input: 用户输入
-        :param history: 历史消息列表
-        :param system_prompt: 系统提示词
-        :param tmp_model: 临时模型
-        :param tmp_tools: 临时工具列表
-        :param tmp_prompt: 临时提示词
-        :return: 智能体输出
-        """
+    ):
+        """流式调用智能体：逐块产出回答增量（异步生成器）"""
         try:
-            # 前置安全检测
+            # 前置安全检测（非流式，先跑完再流）
             is_attack = await self._security_detect(user_input)
             if is_attack:
-                intercept_text = "此为攻击行为, 结束此次会话"
-                return intercept_text
+                yield "此为用户输入被拦截（攻击行为）, 结束本次会话"
+                return
 
-
-            # 正常请求，执行原有全部业务逻辑
             messages = self._build_messages(user_input, history, system_prompt)
-
             agent = self._get_agent(tmp_model, tmp_tools, tmp_prompt)
             log.info(f"[TopSupervisor] 开始构建主层Agent")
-            resp = await agent.ainvoke({"messages": messages})
-            msg_list = resp["messages"]
-            last_msg = msg_list[-1]
-            reply = last_msg.content
 
+            full_text: list[str] = []
+            all_msgs: list[BaseMessage] = []          # 收集所有消息（含工具消息）
+            async for message, _meta in agent.astream(
+                {"messages": messages}, stream_mode="messages"
+            ):
+                all_msgs.append(message)
+                if isinstance(message, AIMessageChunk) and message.content:
+                    chunk = str(message.content)
+                    full_text.append(chunk)
+                    yield chunk
+
+            # 工具调用日志（和 ainvoke 一致）
             tool_call_names = sorted({
                 item["name"]
-                for msg in msg_list
+                for msg in all_msgs
                 for item in getattr(msg, "tool_calls", [])
             })
             if tool_call_names:
@@ -168,22 +164,19 @@ class SupervisorAgent(BaseAgentTemplate):
 
             log.info(f"[TopSupervisor] 顶层Agent推理完成")
 
-
+            # 记忆保存（和 ainvoke 一致：human / ai / tool）
             if self._memory:
-                for msg in msg_list:
-                    if isinstance(msg, HumanMessage):
-                        self._memory.add(role="human", content=msg.content)
-                    elif isinstance(msg, AIMessage):
-                        self._memory.add(role="ai", content=msg.content)
-                    elif isinstance(msg, ToolMessage):
+                self._memory.add(role="human", content=user_input)
+                self._memory.add(role="ai", content="".join(full_text))
+                for msg in all_msgs:
+                    if isinstance(msg, ToolMessage):
                         tool_content = msg.content if isinstance(msg.content, str) else str(msg.content)
                         self._memory.add(role="tool", content=tool_content[:TOOL_RESULT_MAX_CHARS])
-            return reply
         except Exception as e:
-            log.error(f" [TopSupervisor] 调用大模型失败: {e}", exc_info=True)
+            log.error(f" [TopSupervisor] 流式调用失败: {e}", exc_info=True)
             if self.config.debug_mode:
                 raise RuntimeError(e) from e
-            return f"智能体调用失败: {e}"
+            yield f"智能体调用失败: {e}"
 
 
     def ainvoke_wrapper(self, state: GraphState) -> GraphState:
@@ -191,5 +184,3 @@ class SupervisorAgent(BaseAgentTemplate):
 
     def _get_error_tip(self) -> str:
         raise RuntimeError("顶层主Agent不作为LangGraph节点调用，该方法禁止执行")
-
-
