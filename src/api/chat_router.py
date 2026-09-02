@@ -2,7 +2,7 @@ import json
 from src.mcp.client import begin_request, end_request
 from fastapi import APIRouter
 from starlette.responses import StreamingResponse
-
+from src.config.settings import settings
 from src.api.schemas import ChatBody
 from src.llm.factory import llm_factory
 from src.memory.memory import CommonMemory
@@ -16,7 +16,11 @@ router = APIRouter()
 async def list_models():
     """ 列出所有支持的对话模型（给前端下拉框用，chat + vision，排除 embed） """
     chat_models = llm_factory.get_supported_models(model_types=["chat", "vision"])
-    return {"code": 200, "data": chat_models}
+    return {
+        "code": 200,
+        "data": chat_models,
+        "default_model": settings.agent_default_model,  # 新增：默认模型名
+    }
 
 
 

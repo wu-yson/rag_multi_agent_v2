@@ -199,6 +199,8 @@ class GraphInvokeTool(BaseTool):
                 item = agent_outputs[task_id]
                 output = item.get("error") or item.get("result") or "无输出"
                 summary_parts.append(f"task {task_id} 输出：{output}")
+            summary_text = "\n".join(summary_parts)
+            log.info(f"[GraphTool] 返回给主Agent的汇总:\n{summary_text}")
             return "\n".join(summary_parts)
         except Exception as e:
             log.error(f"[GraphTool] 多Agent工作流执行异常，错误信息：{str(e)}", exc_info=True)

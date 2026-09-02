@@ -83,8 +83,7 @@ class SupervisorAgent(BaseAgentTemplate):
                         history_parts.append(f"【人类消息】{item['content']}")
                     elif item["role"] == "ai":
                         history_parts.append(f"【AI回复】{item['content']}")
-                    elif item["role"] == "tool":
-                        history_parts.append(f"【工具执行日志】{item['content']}")
+
                 history_text = "\n".join(history_parts)
                 msg_list.append(SystemMessage(content=history_text))
             except Exception as e:
@@ -143,9 +142,17 @@ class SupervisorAgent(BaseAgentTemplate):
             full_text: list[str] = []
             all_msgs: list[BaseMessage] = []          # 收集所有消息（含工具消息）
             async for message, _meta in agent.astream(
-                {"messages": messages}, stream_mode="messages"
+                {"messages": messages},
+                stream_mode="messages",
+                config={"recursion_limit": 8},
             ):
                 all_msgs.append(message)
+
+                if isinstance(message, ToolMessage):
+                    log.info(f"[TopSupervisor] 收到工具结果: {str(message.content)[:120]}")
+                if isinstance(message, AIMessageChunk) and message.tool_calls:
+                    log.info(f"[TopSupervisor] 主Agent决定调工具: {[c['name'] for c in message.tool_calls]}")
+
                 if isinstance(message, AIMessageChunk) and message.content:
                     chunk = str(message.content)
                     full_text.append(chunk)

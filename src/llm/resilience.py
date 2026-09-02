@@ -6,6 +6,7 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     ModelRetryMiddleware,
     ModelFallbackMiddleware,
+    ToolCallLimitMiddleware,
 )
 
 from src.config.settings import settings
@@ -129,7 +130,13 @@ def build_agent_middleware(primary_model, client_loader):
     :param primary_model: 主模型客户端
     :param client_loader: 取客户端的函数（传 llm_factory.get_client）
     """
-    middleware = [CircuitBreakerMiddleware()]
+    middleware = [
+        CircuitBreakerMiddleware(),
+        # graph_invoke 单次调用：主Agent最多拆一次任务，超了阻止继续（防循环）
+        ToolCallLimitMiddleware(tool_name="graph_invoke", run_limit=1),
+        # 保险丝：单次任务内所有工具总调用最多 2 次
+        ToolCallLimitMiddleware(run_limit=2),
+    ]
 
     # 兜底：备用模型（用真实客户端对象）
     fallback_clients = []

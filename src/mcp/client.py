@@ -97,9 +97,12 @@ async def get_doc_tools():
 
 
 async def get_rag_tools():
-    """rag_agent 用的工具（白名单过滤）"""
+    """rag_agent 用的工具（白名单过滤 + 包装超时）"""
     tools = await get_tools()
-    return [t for t in tools if t.name in RAG_TOOL_NAMES]
+    return [
+        _patch_tool_with_root(t, timeout=300 if t.name == "document_storage" else 90)
+        for t in tools if t.name in RAG_TOOL_NAMES
+    ]
 
 
 def set_workspace_root(session_id: str, path: str) -> None:
@@ -109,7 +112,7 @@ def set_workspace_root(session_id: str, path: str) -> None:
 
 
 
-def _patch_tool_with_root(tool):
+def _patch_tool_with_root(tool, timeout: float = 90):
     """包装 MCP 工具：调用时若 file_path 是相对路径，补全成当前窗口根下的绝对路径"""
     async def _run(**kwargs):
         kwargs = dict(kwargs)
@@ -119,7 +122,7 @@ def _patch_tool_with_root(tool):
             fp = kwargs.get("file_path")
             if isinstance(fp, str) and not os.path.isabs(fp):
                 kwargs["file_path"] = os.path.join(root, fp)
-        return await tool.ainvoke(kwargs)
+        return await asyncio.wait_for(tool.ainvoke(kwargs), timeout=timeout)
     return StructuredTool.from_function(
         coroutine=_run,
         name=tool.name,
