@@ -1,43 +1,95 @@
+"""知识库节点：纯执行，不用 LLM。检索 / 入库拆成两个节点，由图的 target_agent 路由。"""
+import json
+import re
 
-from typing import Any
-
+from src.base.agents_base import NodeKeyBase
 from src.mcp.client import get_rag_tools
-from src.prompts import get_prompt
-from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, NodeKeyBase
 from src.supervisor_agent.graph_tool.graph import agents_graph
+from src.utils.logger import log
 
 
+def _pick_tool(tools, name):
+    for t in tools:
+        if t.name == name:
+            return t
+    raise RuntimeError(f"MCP 未提供工具: {name}")
 
 
-class RAGAgent(BaseAgentTemplate):
-    """ rag智能体
-        向量知识库智能体，支持目录文档向量入库、建立索引，同时可以检索向量库内已存入的文档内容，解答文档相关问题
-    """
+def _extract_dir_path(content: str) -> str:
+    """从任务描述里提取 Windows 绝对路径；提取不到返回空，工具会用默认目录。"""
+    m = re.search(r"[A-Za-z]:[\\/][^\s，。；;]+", content)
+    return m.group(0) if m else ""
 
 
-    def __init__(self):
-        cfg = BaseAgentConfig()
-        super().__init__(config=cfg)
+class RagSearchNode:
+    """知识库检索节点：直接调 rag_search，把 content 提纯后返回。"""
+    output_key = NodeKeyBase.RAG_SEARCH
 
-    @property
-    def system_prompt(self) -> str:
-        if self._system_prompt is None:
-            self._system_prompt = get_prompt("rag_agent_prompt")
-        return self._system_prompt
+    async def ainvoke_wrapper(self, state):
+        task = state["task_messages"][str(state["current_task_id"])]
+        content = task.get("task_content", "")
 
-    async def _load_tools(self):
-        """rag 工具从 MCP 加载"""
-        return await get_rag_tools()
+        tools = await get_rag_tools()
+        tool = _pick_tool(tools, "rag_search")
+        result = await tool.ainvoke({"user_input": content})
+
+        # MCP 返回 [{'type':'text','text':'JSON字符串'}]，拆出 content 给 doc 总结用
+        texts = []
+        metadata = []
+        for block in result:
+            try:
+                obj = json.loads(block.get("text") or "")
+                texts.append(obj.get("content") or "")
+                if obj.get("metadata"):
+                    metadata.append(obj["metadata"])
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                texts.append(str(block.get("text") or ""))
+
+        text = "\n\n".join([t for t in texts if t])
+        log.info(f"[RagSearchNode] 检索完成，返回 {len(text)} 字，元数据 {len(metadata)} 条")
+
+        state["agent_outputs"] = {
+            **state.get("agent_outputs", {}),
+            str(state["current_task_id"]): {
+                "target_agent": self.output_key,
+                "result": text,
+                "error": "",
+            },
+        }
+        state["current_task_id"] = None
+        state["runtime_task_inputs"] = []
+        return state
 
 
-    @property
-    def output_key(self) -> str:
-        return NodeKeyBase.RAG_AGENT
+class RagStorageNode:
+    """知识库入库节点：直接调 document_storage。"""
+    output_key = NodeKeyBase.RAG_STORAGE
 
-    def _get_error_tip(self) -> str:
-        return "文档检索服务临时出错，请重试"
+    async def ainvoke_wrapper(self, state):
+        task = state["task_messages"][str(state["current_task_id"])]
+        content = task.get("task_content", "")
 
-# 唯一实例
-rag_agent = RAGAgent()
+        tools = await get_rag_tools()
+        tool = _pick_tool(tools, "document_storage")
+        dir_path = _extract_dir_path(content)
+        result = await tool.ainvoke({"dir_path": dir_path})
+
+        state["agent_outputs"] = {
+            **state.get("agent_outputs", {}),
+            str(state["current_task_id"]): {
+                "target_agent": self.output_key,
+                "result": result,
+                "error": "",
+            },
+        }
+        state["current_task_id"] = None
+        state["runtime_task_inputs"] = []
+        log.info(f"[RagStorageNode] 入库结果: {str(result)[:120]}")
+        return state
+
+
 # 图节点注册
-agents_graph.register_sub_agent(rag_agent.output_key, rag_agent)
+rag_search_node = RagSearchNode()
+rag_storage_node = RagStorageNode()
+agents_graph.register_sub_agent(rag_search_node.output_key, rag_search_node)
+agents_graph.register_sub_agent(rag_storage_node.output_key, rag_storage_node)

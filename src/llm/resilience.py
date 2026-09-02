@@ -1,11 +1,10 @@
-﻿"""模型调用弹性层：熔断（手写极简版）+ 兜底 + 重试（agent 中间件）"""
+﻿"""模型调用弹性层：熔断（手写极简版）+ 工具上限 + 重试（agent 中间件）"""
 import time
 import httpx
 import openai
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelRetryMiddleware,
-    ModelFallbackMiddleware,
     ToolCallLimitMiddleware,
 )
 
@@ -125,29 +124,15 @@ class CircuitBreakerMiddleware(AgentMiddleware):
             raise
 
 
-def build_agent_middleware(primary_model, client_loader):
-    """组装 agent 弹性中间件：熔断 → 兜底 → 重试
-    :param primary_model: 主模型客户端
-    :param client_loader: 取客户端的函数（传 llm_factory.get_client）
-    """
+def build_agent_middleware():
+    """组装 agent 弹性中间件：熔断 → 工具上限 → 重试"""
     middleware = [
         CircuitBreakerMiddleware(),
         # graph_invoke 单次调用：主Agent最多拆一次任务，超了阻止继续（防循环）
-        ToolCallLimitMiddleware(tool_name="graph_invoke", run_limit=1),
+        ToolCallLimitMiddleware(tool_name="graph_invoke", run_limit=2),
         # 保险丝：单次任务内所有工具总调用最多 2 次
         ToolCallLimitMiddleware(run_limit=2),
+        # 重试：临时抖动重试 1 次
+        ModelRetryMiddleware(max_retries=1, retry_on=TRANSIENT_ERRORS, on_failure="error"),
     ]
-
-    # 兜底：备用模型（用真实客户端对象）
-    fallback_clients = []
-    for m in settings.model_fallback_chain:
-        try:
-            fallback_clients.append(client_loader(m))
-        except Exception as e:
-            log.warning(f"[resilience] 备用模型 {m} 获取失败: {e}")
-    if fallback_clients:
-        middleware.append(ModelFallbackMiddleware(primary_model, *fallback_clients))
-
-    # 重试：临时抖动重试 1 次
-    middleware.append(ModelRetryMiddleware(max_retries=1, retry_on=TRANSIENT_ERRORS, on_failure="error"))
     return middleware

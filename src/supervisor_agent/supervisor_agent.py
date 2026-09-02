@@ -1,6 +1,7 @@
 ﻿import json
 
 from src.llm.resilience import build_agent_middleware
+from src.config.settings import settings
 from src.utils.logger import log
 from typing import Optional, Any
 
@@ -39,7 +40,7 @@ class SupervisorAgent(BaseAgentTemplate):
             self._tools = [graph_invoke]
         return self._tools
 
-    def _get_agent(
+    async def _get_agent(
         self,
         tmp_model: Optional[str],
         tmp_tools: Optional[list[Any]],
@@ -47,7 +48,7 @@ class SupervisorAgent(BaseAgentTemplate):
     ) -> Any:
         """ 获取自定义的Agent实例 """
         if not any((tmp_model, tmp_tools, tmp_prompt)):
-            return self.default_agent
+            return await self.get_agent()
         use_llm = llm_factory.get_client(tmp_model) if tmp_model else self._llm
         use_tools = tmp_tools if tmp_tools is not None else self.tools
         use_prompt = tmp_prompt if tmp_prompt else self.system_prompt
@@ -57,7 +58,7 @@ class SupervisorAgent(BaseAgentTemplate):
             model=use_llm,
             system_prompt=use_prompt,
             tools=use_tools,
-            middleware=build_agent_middleware(use_llm, llm_factory.get_client),
+            middleware=build_agent_middleware(),
         )
 
     def _build_messages(
@@ -77,6 +78,7 @@ class SupervisorAgent(BaseAgentTemplate):
         if self._memory:
             try:
                 history_items = self._memory.get_recent()
+                history_items = history_items[-4:]   # 只保留最近 4 条（约最近 2 轮）
                 history_parts = ["【历史会话记录】以下为对话历史，仅作背景参考："]
                 for item in history_items:
                     if item["role"] == "human":
@@ -118,6 +120,28 @@ class SupervisorAgent(BaseAgentTemplate):
             return False
 
 
+    def _log_tool_calls(self, all_msgs: list[BaseMessage]):
+        """记录主Agent本轮调用的工具"""
+        tool_call_names = sorted({
+            item["name"]
+            for msg in all_msgs
+            for item in getattr(msg, "tool_calls", [])
+        })
+        if tool_call_names:
+            log.info(f"[TopSupervisor] LLM决策：调用工具，工具列表：{tool_call_names}")
+        else:
+            log.info("[TopSupervisor] LLM决策：无工具调用，直接输出回复")
+
+    def _save_memory(self, user_input: str, full_text: list[str], all_msgs: list[BaseMessage]):
+        """保存本轮 human / ai / tool 到记忆"""
+        if self._memory:
+            self._memory.add(role="human", content=user_input)
+            self._memory.add(role="ai", content="".join(full_text))
+            for msg in all_msgs:
+                if isinstance(msg, ToolMessage):
+                    tool_content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    self._memory.add(role="tool", content=tool_content[:TOOL_RESULT_MAX_CHARS])
+
     async def astream(
         self,
         user_input: str,
@@ -129,14 +153,15 @@ class SupervisorAgent(BaseAgentTemplate):
     ):
         """流式调用智能体：逐块产出回答增量（异步生成器）"""
         try:
-            # 前置安全检测（非流式，先跑完再流）
-            is_attack = await self._security_detect(user_input)
-            if is_attack:
-                yield "此为用户输入被拦截（攻击行为）, 结束本次会话"
-                return
+            # 前置安全检测（开关控制，默认关闭）
+            if settings.agent_security_check:
+                is_attack = await self._security_detect(user_input)
+                if is_attack:
+                    yield "此为用户输入被拦截（攻击行为）, 结束本次会话"
+                    return
 
             messages = self._build_messages(user_input, history, system_prompt)
-            agent = self._get_agent(tmp_model, tmp_tools, tmp_prompt)
+            agent = await self._get_agent(tmp_model, tmp_tools, tmp_prompt)
             log.info(f"[TopSupervisor] 开始构建主层Agent")
 
             full_text: list[str] = []
@@ -158,27 +183,9 @@ class SupervisorAgent(BaseAgentTemplate):
                     full_text.append(chunk)
                     yield chunk
 
-            # 工具调用日志（和 ainvoke 一致）
-            tool_call_names = sorted({
-                item["name"]
-                for msg in all_msgs
-                for item in getattr(msg, "tool_calls", [])
-            })
-            if tool_call_names:
-                log.info(f"[TopSupervisor] LLM决策：调用工具，工具列表：{tool_call_names}")
-            else:
-                log.info("[TopSupervisor] LLM决策：无工具调用，直接输出回复")
-
+            self._log_tool_calls(all_msgs)
             log.info(f"[TopSupervisor] 顶层Agent推理完成")
-
-            # 记忆保存（和 ainvoke 一致：human / ai / tool）
-            if self._memory:
-                self._memory.add(role="human", content=user_input)
-                self._memory.add(role="ai", content="".join(full_text))
-                for msg in all_msgs:
-                    if isinstance(msg, ToolMessage):
-                        tool_content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        self._memory.add(role="tool", content=tool_content[:TOOL_RESULT_MAX_CHARS])
+            self._save_memory(user_input, full_text, all_msgs)
         except Exception as e:
             log.error(f" [TopSupervisor] 流式调用失败: {e}", exc_info=True)
             if self.config.debug_mode:

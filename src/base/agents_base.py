@@ -13,7 +13,8 @@ from src.llm.factory import llm_factory
 
 class NodeKeyBase:
     # 统一存放所有Graph子节点标识
-    RAG_AGENT = "rag_agent"
+    RAG_SEARCH = "rag_search"  # 知识库检索节点(普通函数节点)
+    RAG_STORAGE = "rag_storage"  # 文档入库节点(普通函数节点)
     DOC_AGENT = "doc_agent"
 
 
@@ -89,23 +90,11 @@ class BaseAgentTemplate:
                 model=self.llm,
                 system_prompt=self.system_prompt,
                 tools=tools,
-                middleware=build_agent_middleware(self.llm, llm_factory.get_client),
+                middleware=build_agent_middleware(),
             )
         return self._default_agent
 
 
-
-    @property
-    def default_agent(self):
-        """ 懒加载拼装langchain原生Agent执行实例 """
-        if self._default_agent is None:
-            self._default_agent = create_agent(
-                model=self.llm,
-                system_prompt=self.system_prompt,
-                tools=self.tools,
-                middleware=build_agent_middleware(self.llm, llm_factory.get_client),
-            )
-        return self._default_agent
 
     @property
     def output_key(self) -> str:

@@ -3,6 +3,7 @@ import asyncio
 import json
 from typing import Any, Dict
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
 from src.base.agents_base import GraphState
@@ -142,72 +143,71 @@ agents_graph = MultiAgentWorkflow()
 
 def _ensure_sub_agents_registered():
     """ 懒加载子 Agent，避免包初始化循环导入。 """
-    if "rag_agent" not in agents_graph.sub_agents:
-        from src.rag_agent.rag_agent import rag_agent  # noqa: F401
+    if "rag_search" not in agents_graph.sub_agents:
+        from src.rag_agent.rag_agent import rag_search_node  # noqa: F401
+    if "rag_storage" not in agents_graph.sub_agents:
+        from src.rag_agent.rag_agent import rag_storage_node  # noqa: F401  # noqa: F401
     if "doc_agent" not in agents_graph.sub_agents:
         from src.doc_agent.document_agent import doc_agent  # noqa: F401
+
+
+class TaskItem(BaseModel):
+    target_agent: str = Field(description="子节点名：rag_search / rag_storage / doc_agent")
+    task_content: str = Field(description="该任务的具体内容")
+    depends_on: list[str] = Field(default_factory=list, description="依赖的任务ID列表")
+
+class WorkflowPlan(BaseModel):
+    task_messages: dict[str, TaskItem] = Field(description="任务字典，key 为任务ID字符串")
 
 
 class GraphInvokeTool(BaseTool):
     """ 图工具接口 """
     name: str = "graph_invoke"
+    args_schema: type[WorkflowPlan] = WorkflowPlan
     description: str = (
-        "调用内部多子Agent协同工作流；调用时传入包含 task_messages 的 JSON 字符串。"
-        "文档入库、知识库检索必须用 target_agent=rag_agent；本地文件读写、生成Word/Excel/Txt必须用 target_agent=doc_agent。"
+        "调用内部多子Agent协同工作流；传入 task_messages 任务字典。"
+        "知识库检索必须用 target_agent=rag_search；文档入库必须用 target_agent=rag_storage；"
+        "本地文件读写、生成Word/Excel/Txt必须用 target_agent=doc_agent。"
     )
 
-    async def _arun(self, workflow_json: str) -> str:
-        try:
-            if isinstance(workflow_json, str):
-                try:
-                    plan = json.loads(workflow_json)
-                except json.JSONDecodeError:
-                    plan = ast.literal_eval(workflow_json)
+    def _build_summary(self, graph_state, normalized_tasks) -> str:
+        """按依赖区分中间/最终任务，生成结果汇总"""
+        summary_parts = [
+            "========== 多子Agent工作流执行结果汇总 ==========",
+            "各步骤输出：",
+        ]
+        agent_outputs = graph_state.get('agent_outputs', {})
+        depended = set()
+        for t in normalized_tasks.values():
+            for dep in (t.get('depends_on') or []):
+                depended.add(str(dep))
+        for task_id in sorted(agent_outputs, key=lambda x: int(x) if x.isdigit() else x):
+            item = agent_outputs[task_id]
+            full = item.get("error") or item.get("result") or "无输出"
+            log.info(f"[GraphTool] task {task_id} 完整结果: {full}")
+            if str(task_id) in depended:
+                status = "失败" if item.get("error") else "成功"
+                summary_parts.append(f"task {task_id}：{status}")
             else:
-                plan = workflow_json
-            if (
-                not isinstance(plan, dict)
-                or not isinstance(plan.get("task_messages"), dict)
-                or not plan["task_messages"]
-            ):
-                raise ValueError("缺少 task_messages 字典")
-            normalized_tasks = {}
-            for task_id, task in plan["task_messages"].items():
-                if not isinstance(task, dict) or not task.get("target_agent"):
-                    raise ValueError(f"任务 {task_id} 缺少 target_agent")
-                if not isinstance(task.get("depends_on", []), list):
-                    raise ValueError(f"任务 {task_id} 的 depends_on 格式错误")
-                normalized_tasks[str(task_id)] = task
-        except (ValueError, TypeError, SyntaxError) as e:
-            log.warning(f"[GraphTool] task_messages 格式错误：{e}")
-            return json.dumps({
-                "error": f"FORMAT_ERROR: {e}",
-                "hint": "请重新输出 task_messages 字典，key 为任务ID，字段为 target_agent、task_content、depends_on",
-            }, ensure_ascii=False)
+                summary_parts.append(f"task {task_id} 输出：{full}")
+        summary_text = "\n".join(summary_parts)
+        log.info(f"[GraphTool] 返回给主Agent的汇总:\n{summary_text}")
+        return summary_text
 
+    async def _arun(self, task_messages: dict) -> str:
+        normalized_tasks = {
+            str(k): (v.model_dump() if isinstance(v, TaskItem) else v)
+            for k, v in task_messages.items()
+        }
         try:
-            log.info(f"[GraphTool] 主Agent拆解任务：{json.dumps(plan, ensure_ascii=False)}")
+            log.info(f"[GraphTool] 主Agent拆解任务：{json.dumps(normalized_tasks, ensure_ascii=False)}")
             graph_state = await agents_graph.ainvoke(task_messages=normalized_tasks)
-
-            summary_parts = [
-                "========== 多子Agent工作流执行结果汇总 ==========",
-                "各步骤输出：",
-            ]
-
-            agent_outputs = graph_state.get("agent_outputs", {})
-            for task_id in sorted(agent_outputs, key=lambda x: int(x) if x.isdigit() else x):
-                item = agent_outputs[task_id]
-                output = item.get("error") or item.get("result") or "无输出"
-                summary_parts.append(f"task {task_id} 输出：{output}")
-            summary_text = "\n".join(summary_parts)
-            log.info(f"[GraphTool] 返回给主Agent的汇总:\n{summary_text}")
-            return "\n".join(summary_parts)
+            return self._build_summary(graph_state, normalized_tasks)
         except Exception as e:
             log.error(f"[GraphTool] 多Agent工作流执行异常，错误信息：{str(e)}", exc_info=True)
             raise
 
-    def _run(self, workflow_json: str) -> str:
+    def _run(self, task_messages: dict) -> str:
         raise NotImplementedError("graph_invoke 仅支持异步调用")
 
-# 注册工具实例
 graph_invoke = GraphInvokeTool()

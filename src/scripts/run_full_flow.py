@@ -6,7 +6,6 @@ import asyncio
 
 from src.doc_agent.document_agent import doc_agent
 from src.mcp.client import close
-from src.rag_agent.rag_agent import rag_agent
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -36,8 +35,7 @@ async def run_test():
 
 async def main():
     d = await doc_agent.get_agent()
-    r = await rag_agent.get_agent()
-    print("doc agent 创建成功 | rag agent 创建成功")
+    print("doc agent 创建成功")
     await close()
 
 

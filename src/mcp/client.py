@@ -97,7 +97,7 @@ async def get_doc_tools():
 
 
 async def get_rag_tools():
-    """rag_agent 用的工具（白名单过滤 + 包装超时）"""
+    """rag 检索/入库工具（白名单过滤 + 包装超时）"""
     tools = await get_tools()
     return [
         _patch_tool_with_root(t, timeout=300 if t.name == "document_storage" else 90)
