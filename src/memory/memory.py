@@ -7,7 +7,7 @@ from src.utils.logger import log
 from src.config.settings import settings
 from sqlalchemy import func
 from sqlmodel import SQLModel, Field, create_engine, Session, select, delete
-from difflib import SequenceMatcher
+
 
 
 # 单条消息最大token数，默认4k
@@ -104,11 +104,6 @@ class CommonMemory:
             self.max_context_tokens = max_context_tokens
         SQLModel.metadata.create_all(global_engine)
 
-    def _similar(self, a: str, b: str, threshold: float = 0.85) -> bool:
-        """两个字符串相似度判断，用于去重"""
-        if not a or not b:
-            return False
-        return SequenceMatcher(None, a, b).ratio() >= threshold
 
 
     def add(self, role: str, content: str):
@@ -124,17 +119,6 @@ class CommonMemory:
         token_num = count_tokens(content)
         try:
             with Session(self.engine) as session:
-                # 去重：与最新一条内容相似则跳过（注意用 self._similar）
-                latest = session.exec(
-                    select(ChatRecord)
-                    .where(ChatRecord.session_id == self.session_id)
-                    .order_by(ChatRecord.create_time.desc())
-                    .limit(1)
-                ).first()
-                if latest and latest.role == role and self._similar(latest.content, content):
-                    log.info("[memory] 与上一条内容相似，跳过入库")
-                    return
-
                 session.add(ChatRecord(
                     session_id = self.session_id,  # 当前实例绑定的会话ID
                     role = role,  # 消息角色（user/assistant）
@@ -239,7 +223,7 @@ class CommonMemory:
                 stmt = session.exec(
                     select(func.count(ChatRecord.id))
                     .where(ChatRecord.session_id == self.session_id)
-                ).scalar()
+                ).one()
                 return stmt or 0
         except Exception as e:
             log.error(f"[memory]获取会话记录条数失败：{e}")

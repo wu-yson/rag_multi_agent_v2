@@ -6,7 +6,7 @@ from src.utils.logger import log
 from typing import Optional, Any
 
 from langchain.agents import create_agent
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessageChunk
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessageChunk, AIMessage
 
 from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, GraphState
 from src.llm.factory import llm_factory
@@ -65,29 +65,18 @@ class SupervisorAgent(BaseAgentTemplate):
         self,
         user_input: str,
         history: Optional[list[BaseMessage]],
-        system_prompt: Optional[str],
     ):
         """ 构建消息列表 """
-        msg_list = []
-
-        if system_prompt and system_prompt.strip():
-            msg_list.append(SystemMessage(content=system_prompt))
-        else:
-            msg_list.append(SystemMessage(content=self.system_prompt))
+        msg_list = [SystemMessage(content=self.system_prompt)]
 
         if self._memory:
             try:
-                history_items = self._memory.get_recent()
-                history_items = history_items[-4:]   # 只保留最近 4 条（约最近 2 轮）
-                history_parts = ["【历史会话记录】以下为对话历史，仅作背景参考："]
-                for item in history_items:
+                for item in self._memory.get_recent():  # 直接取
                     if item["role"] == "human":
-                        history_parts.append(f"【人类消息】{item['content']}")
+                        msg_list.append(HumanMessage(content=item["content"]))
                     elif item["role"] == "ai":
-                        history_parts.append(f"【AI回复】{item['content']}")
+                        msg_list.append(AIMessage(content=item["content"]))
 
-                history_text = "\n".join(history_parts)
-                msg_list.append(SystemMessage(content=history_text))
             except Exception as e:
                 log.error(f" [TopSupervisor] 获取历史会话失败: {e}")
         if history:
@@ -146,7 +135,6 @@ class SupervisorAgent(BaseAgentTemplate):
         self,
         user_input: str,
         history: Optional[list[BaseMessage]] = None,
-        system_prompt: Optional[str] = None,
         tmp_model: Optional[str] = None,
         tmp_tools: Optional[list[Any]] = None,
         tmp_prompt: Optional[str] = None,
@@ -160,7 +148,7 @@ class SupervisorAgent(BaseAgentTemplate):
                     yield "此为用户输入被拦截（攻击行为）, 结束本次会话"
                     return
 
-            messages = self._build_messages(user_input, history, system_prompt)
+            messages = self._build_messages(user_input, history)
             agent = await self._get_agent(tmp_model, tmp_tools, tmp_prompt)
             log.info(f"[TopSupervisor] 开始构建主层Agent")
 
