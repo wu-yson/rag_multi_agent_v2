@@ -74,7 +74,7 @@ class OllamaProvider:
     supported_models_embed = ["qwen3-embedding:8b"]
 
     def __init__(self, config: ProviderConfig):
-        self.coning = config
+        self.config = config
 
     def get_client(self, model_name: str) -> BaseChatModel | OllamaEmbeddings:
         """ 获取模型客户端。"""
@@ -87,16 +87,16 @@ class OllamaProvider:
             log.info(f" [LLM] 创建 Ollama 客户端, 使用本地模型: {model_name}")
             return ChatOllama(
                 model=model_name,
-                base_url=self.coning.base_url,
-                timeout=self.coning.timeout,
-                temperature=self.coning.temperature
+                base_url=self.config.base_url,
+                timeout=self.config.timeout,
+                temperature=self.config.temperature
             )
         elif model_name in self.supported_models_embed:
             log.info(f" [LLM] 创建 Ollama 嵌入模型客户端, 使用本地模型: {model_name}")
             return OllamaEmbeddings(
                 model=model_name,
-                base_url=self.coning.base_url,
-                client_kwargs={"timeout": self.coning.timeout}
+                base_url=self.config.base_url,
+                client_kwargs={"timeout": self.config.timeout}
             )
         else:
             log.info(f" [LLM] 创建 Ollama 视觉模型客户端, 使用本地模型: {model_name}")
@@ -155,8 +155,8 @@ class LLMFactory:
 
         try:
             (config_loader, provider_cls) = self._providers[provider_name]
-            coning = config_loader()
-            provider = provider_cls(coning)
+            config = config_loader()
+            provider = provider_cls(config)
             client = provider.get_client(model_name)
             self._client_cache[model_name] = client
             return client
@@ -177,23 +177,7 @@ class LLMFactory:
             return list(self._routing.keys())
         return [m for m, t in self._model_types.items() if t in model_types]
 
-    def add_provider(self, name: str, config_loader, provider_cls):
-        """
-        运行时添加新供应商
-        前置需求, 要先写好加载配置函数和对应的供应商类, 才能调用这个函数
-        """
-        self._providers[name] = (config_loader, provider_cls)
-        all_models = []
-        if hasattr(provider_cls, "supported_models_chat"):
-            all_models.extend(provider_cls.supported_models_chat)
-        if hasattr(provider_cls, "supported_models_embed"):
-            all_models.extend(provider_cls.supported_models_embed)
-        if hasattr(provider_cls, "vision_models"):
-            all_models.extend(provider_cls.vision_models)
-        for model in all_models:
-            self._routing[model] = name
-            self._client_cache.pop(model, None)
-        log.info(f" [LLM] 动态添加供应商 {name} 添加成功，支持的模型为: {all_models}")
+
 
 # ========== 全局实例对象 ==========
 llm_factory = LLMFactory()
