@@ -41,8 +41,5 @@ class AppSettings(BaseSettings):
     # mcp配置__
     mcp_server_path: str = ""
 
-    # 模型回退链 __
-    model_fallback_chain: list[str] = ["qwen3.7-flash"]
-
 
 settings = AppSettings()
