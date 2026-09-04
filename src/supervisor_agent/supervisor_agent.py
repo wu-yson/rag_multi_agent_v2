@@ -15,7 +15,6 @@ from src.prompts import get_prompt
 from src.supervisor_agent.graph_tool.graph import graph_invoke
 
 
-TOOL_RESULT_MAX_CHARS = 300
 
 
 
@@ -44,14 +43,13 @@ class SupervisorAgent(BaseAgentTemplate):
         self,
         tmp_model: Optional[str],
         tmp_tools: Optional[list[Any]],
-        tmp_prompt: Optional[str]
     ) -> Any:
         """ 获取自定义的Agent实例 """
-        if not any((tmp_model, tmp_tools, tmp_prompt)):
+        if not any((tmp_model, tmp_tools)):
             return await self.get_agent()
         use_llm = llm_factory.get_client(tmp_model) if tmp_model else self._llm
         use_tools = tmp_tools if tmp_tools is not None else self.tools
-        use_prompt = tmp_prompt if tmp_prompt else self.system_prompt
+        use_prompt = self.system_prompt
 
         log.info(f" [TopSupervisor] 初始化自定义Agent")
         return create_agent(
@@ -64,7 +62,6 @@ class SupervisorAgent(BaseAgentTemplate):
     def _build_messages(
         self,
         user_input: str,
-        history: Optional[list[BaseMessage]],
     ):
         """ 构建消息列表 """
         msg_list = [SystemMessage(content=self.system_prompt)]
@@ -79,8 +76,7 @@ class SupervisorAgent(BaseAgentTemplate):
 
             except Exception as e:
                 log.error(f" [TopSupervisor] 获取历史会话失败: {e}")
-        if history:
-            msg_list.extend(history)
+
         msg_list.append(HumanMessage(content=user_input))
         return msg_list
 
@@ -109,18 +105,6 @@ class SupervisorAgent(BaseAgentTemplate):
             return False
 
 
-    def _log_tool_calls(self, all_msgs: list[BaseMessage]):
-        """记录主Agent本轮调用的工具"""
-        tool_call_names = sorted({
-            item["name"]
-            for msg in all_msgs
-            for item in getattr(msg, "tool_calls", [])
-        })
-        if tool_call_names:
-            log.info(f"[TopSupervisor] LLM决策：调用工具，工具列表：{tool_call_names}")
-        else:
-            log.info("[TopSupervisor] LLM决策：无工具调用，直接输出回复")
-
     def _save_memory(self, user_input: str, full_text: list[str], all_msgs: list[BaseMessage]):
         """保存本轮 human / ai / tool 到记忆"""
         if self._memory:
@@ -129,12 +113,11 @@ class SupervisorAgent(BaseAgentTemplate):
             for msg in all_msgs:
                 if isinstance(msg, ToolMessage):
                     tool_content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                    self._memory.add(role="tool", content=tool_content[:TOOL_RESULT_MAX_CHARS])
+                    self._memory.add(role="tool", content=tool_content)
 
     async def astream(
         self,
         user_input: str,
-        history: Optional[list[BaseMessage]] = None,
         tmp_model: Optional[str] = None,
         tmp_tools: Optional[list[Any]] = None,
         tmp_prompt: Optional[str] = None,
@@ -148,8 +131,8 @@ class SupervisorAgent(BaseAgentTemplate):
                     yield "此为用户输入被拦截（攻击行为）, 结束本次会话"
                     return
 
-            messages = self._build_messages(user_input, history)
-            agent = await self._get_agent(tmp_model, tmp_tools, tmp_prompt)
+            messages = self._build_messages(user_input)
+            agent = await self._get_agent(tmp_model, tmp_tools)
             log.info(f"[TopSupervisor] 开始构建主层Agent")
 
             full_text: list[str] = []
@@ -161,17 +144,11 @@ class SupervisorAgent(BaseAgentTemplate):
             ):
                 all_msgs.append(message)
 
-                if isinstance(message, ToolMessage):
-                    log.info(f"[TopSupervisor] 收到工具结果: {str(message.content)[:120]}")
-                if isinstance(message, AIMessageChunk) and message.tool_calls:
-                    log.info(f"[TopSupervisor] 主Agent决定调工具: {[c['name'] for c in message.tool_calls]}")
-
                 if isinstance(message, AIMessageChunk) and message.content:
                     chunk = str(message.content)
                     full_text.append(chunk)
                     yield chunk
 
-            self._log_tool_calls(all_msgs)
             log.info(f"[TopSupervisor] 顶层Agent推理完成")
             self._save_memory(user_input, full_text, all_msgs)
         except Exception as e:
