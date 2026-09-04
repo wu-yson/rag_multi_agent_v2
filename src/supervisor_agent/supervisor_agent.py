@@ -26,6 +26,7 @@ class SupervisorAgent(BaseAgentTemplate):
         cfg = BaseAgentConfig()
         super().__init__(config=cfg)
         self._memory = memory
+        self.model = settings.supervisor_agent_model
 
     @property
     def system_prompt(self) -> str:

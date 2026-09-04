@@ -89,7 +89,9 @@ class OllamaProvider:
                 model=model_name,
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
-                temperature=self.config.temperature
+                temperature=self.config.temperature,
+                reasoning=False,
+
             )
         elif model_name in self.supported_models_embed:
             log.info(f" [LLM] 创建 Ollama 嵌入模型客户端, 使用本地模型: {model_name}")

@@ -132,6 +132,9 @@ class BaseAgentTemplate:
                 log.info(f"[SubAgentInner][{self.output_key}] LLM决策：无工具调用，直接输出回复")
 
             result_content = last_msg.content
+            if not result_content:  # 既没调工具、又没输出 = 异常
+                log.warning(f"[SubAgentInner][{self.output_key}] 模型无有效输出，任务将按失败处理")
+                result_content = ""
             log.info(f"[SubAgentInner][{self.output_key}] Agent推理完成")
             return result_content
 
@@ -181,12 +184,13 @@ class BaseAgentTemplate:
             state["runtime_task_inputs"] = []
             return state
 
+        result_text = str(result_text or "").strip()
         state["agent_outputs"] = {
             **state.get("agent_outputs", {}),
             str(current_task_id): {
                 "target_agent": self.output_key,
                 "result": result_text,
-                "error": "",
+                "error": "" if result_text else "子Agent未生成有效结果（未调用工具也未输出内容）",
             },
         }
         state["current_task_id"] = None

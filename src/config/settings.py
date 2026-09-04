@@ -34,9 +34,11 @@ class AppSettings(BaseSettings):
 
 
     # 通用agent __
-    agent_default_model: Optional[str] = "qwen3.5:9b"  # 所有agent使用模型
+    agent_default_model: Optional[str] = "qwen3.7-flash"  # 子agent使用模型
     agent_debug_mode: bool = True  # 调试模式
     agent_security_check: bool = False  # 提示词注入安全检测开关（默认关闭）
+
+    supervisor_agent_model: Optional[str] = "qwen3.7-flash"  # 主Agent使用模型：云端
 
     # mcp配置__
     mcp_server_path: str = ""

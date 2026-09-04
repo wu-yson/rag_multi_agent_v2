@@ -1,4 +1,4 @@
-import ast
+
 import asyncio
 import json
 from typing import Any, Dict
@@ -8,6 +8,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
 from src.base.agents_base import GraphState
 from src.utils.logger import log
+
 
 SUB_AGENT_TIMEOUT = 300
 
@@ -65,8 +66,8 @@ class MultiAgentWorkflow:
         started = set()
 
         def deps_satisfied(tid):
-            task = task_messages[tid]
-            return all(str(d) in outputs for d in (task.get("depends_on") or []))
+            deps = task_messages[tid].get("depends_on") or []
+            return all(str(d) in outputs for d in deps)
 
         async def run_one(tid):
             task = task_messages[tid]
@@ -90,14 +91,15 @@ class MultiAgentWorkflow:
                     "error": f"子Agent执行超时（>{SUB_AGENT_TIMEOUT}秒）"
                 }
         running = set()
-        while True:
+        while len(started) < len(task_messages):
             for tid in task_messages:
                 if tid not in started and deps_satisfied(tid):
                     started.add(tid)
                     running.add(asyncio.create_task(run_one(tid)))
             if not running:
-                break
-            done, running = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+                raise RuntimeError(f"任务依赖无法满足: {[t for t in task_messages if t not in started]}")
+            await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)  # ③ 等一个完成
+            running = {t for t in running if not t.done()}  # 清掉已完成的，留还在跑的
         return outputs
 
 

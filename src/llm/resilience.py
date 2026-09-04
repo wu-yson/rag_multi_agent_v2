@@ -128,8 +128,6 @@ def build_agent_middleware():
     """组装 agent 弹性中间件：熔断 → 工具上限 → 重试"""
     middleware = [
         CircuitBreakerMiddleware(),
-        # graph_invoke 单次调用：主Agent最多拆一次任务，超了阻止继续（防循环）
-        ToolCallLimitMiddleware(tool_name="graph_invoke", run_limit=2),
         # 保险丝：单次任务内所有工具总调用最多 2 次
         ToolCallLimitMiddleware(run_limit=2),
         # 重试：临时抖动重试 1 次
