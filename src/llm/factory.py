@@ -36,7 +36,7 @@ def load_ollama_config() -> ProviderConfig:
 
 class QWENProvider:
     """ QWEN供应商类, 创建客户端."""
-    supported_models_chat = ["qwen3.7-flash"]
+    supported_models_chat = ["deepseek-v4-flash-0731"]
     supported_models_embed = ["qwen3.7-text-embedding"]
 
     def __init__(self, config: ProviderConfig):

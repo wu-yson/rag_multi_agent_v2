@@ -1,4 +1,4 @@
-﻿"""模型调用弹性层：熔断（手写极简版）+ 工具上限 + 重试（agent 中间件）"""
+﻿"""模型调用弹性层：熔断+ 工具上限 + 重试（agent 中间件）"""
 import time
 import httpx
 import openai
@@ -8,7 +8,7 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
 )
 
-from src.config.settings import settings
+
 from src.utils.logger import log
 
 

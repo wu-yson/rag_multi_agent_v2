@@ -3,6 +3,7 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import SecretStr
+
 # 拿到项目根目录：src/config 往上两层
 BASE_DIR = Path(__file__).parent.parent.parent
 
@@ -34,14 +35,14 @@ class AppSettings(BaseSettings):
 
 
     # 通用agent __
-    agent_default_model: Optional[str] = "qwen3.7-flash"  # 子agent使用模型
+    agent_default_model: Optional[str] = "deepseek-v4-flash-0731"  # 子agent使用模型
     agent_debug_mode: bool = True  # 调试模式
-    agent_security_check: bool = False  # 提示词注入安全检测开关（默认关闭）
+    agent_security_check: bool = False  # 提示词注入安全检测开关（默认关闭False）
 
-    supervisor_agent_model: Optional[str] = "qwen3.7-flash"  # 主Agent使用模型：云端
+    supervisor_agent_model: Optional[str] = "deepseek-v4-flash-0731"  # 主Agent使用模型：云端
 
     # mcp配置__
-    mcp_server_path: str = ""
+    mcp_server_path: str = ""   # 不写死, 可设置根据需求设置路径
 
 
 settings = AppSettings()
