@@ -13,8 +13,19 @@ from src.llm.models import ProviderInitializationError, ProviderConfig, ModelNot
 
 # ========== 加载供应商配置 ==========
 
+def load_glm_config() -> ProviderConfig:
+    """ 加载 云端供应商 glm 配置。"""
+    return ProviderConfig(
+        api_key=settings.glm_api_key.get_secret_value(),
+        base_url=settings.glm_base_url,
+        timeout=settings.glm_timeout,
+        temperature = settings.glm_temperature
+    )
+
+
+
 def load_qwen_config() -> ProviderConfig:
-    """ 加载 云端供应商Qwen 配置。"""
+    """ 加载 云端供应商 Qwen 配置。"""
     return ProviderConfig(
         api_key=settings.qwen_api_key.get_secret_value(),
         base_url=settings.qwen_base_url,
@@ -32,6 +43,37 @@ def load_ollama_config() -> ProviderConfig:
     )
 
 # ========== 供应商类（负责创建客户端） ==========
+class GLMNProvider:
+    """ glm供应商类, 创建客户端."""
+    supported_models_chat = ["glm-5.3-flash"]
+    supported_models_embed = []
+
+    def __init__(self, config: ProviderConfig):
+        if not config.api_key:
+            raise ProviderInitializationError("qwen API Key 未设置，请检查api")
+        self.config =  config
+
+    def get_client(self, model_name: str) -> BaseChatModel | DashScopeEmbeddings:
+        """ 获取glm模型客户端。"""
+        if model_name not in self.supported_models_chat and model_name not in self.supported_models_embed:
+            raise ModelNotSupportedError(f"模型 {model_name} 不是glm模型, 仅支持模型: {self.supported_models_chat}, {self.supported_models_embed}")
+        if model_name in self.supported_models_chat:
+            log.info(f" [LLM] 使用云端供应商 聊天模型: {model_name}")
+            return ChatOpenAI(
+                model=model_name,
+                api_key=self.config.api_key,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout,
+                temperature=self.config.temperature,
+                max_retries=1,
+            )
+        else:
+            log.info(f" [LLM] 使用云端供应商 文本嵌入模型: {model_name}")
+            return DashScopeEmbeddings(
+                model=model_name,
+                dashscope_api_key=self.config.api_key,
+                max_retries=1,
+            )
 
 
 class QWENProvider:
@@ -121,7 +163,8 @@ class LLMFactory:
     def __init__(self):
         self._providers: dict[str, tuple] = {
             "qwen":(load_qwen_config, QWENProvider),
-            "ollama":(load_ollama_config, OllamaProvider)
+            "ollama":(load_ollama_config, OllamaProvider),
+            "glm": (load_glm_config, GLMNProvider),
         }
         self._routing: dict[str, str] = {}
         self._client_cache: dict[str, Any] = {}
