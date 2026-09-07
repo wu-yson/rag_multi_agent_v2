@@ -42,11 +42,11 @@ class AppSettings(BaseSettings):
 
 
     # 通用agent __
-    agent_default_model: Optional[str] = "glm-5.3-flash"  # 子agent使用模型
+    agent_default_model: Optional[str] = "deepseek-v4-flash-0731"  # 子agent使用模型
     agent_debug_mode: bool = True  # 调试模式
     agent_security_check: bool = False  # 提示词注入安全检测开关（默认关闭False）
 
-    supervisor_agent_model: Optional[str] = "glm-5.3-flash"  # 主Agent使用模型：云端
+    supervisor_agent_model: Optional[str] = "deepseek-v4-flash-0731"  # 主Agent使用模型：云端
 
     # mcp配置__
     mcp_server_path: str = ""   # 不写死, 可设置根据需求设置路径
