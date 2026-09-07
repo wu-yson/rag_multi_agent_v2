@@ -1,7 +1,5 @@
 """知识库节点：纯执行，不用 LLM。检索 / 入库拆成两个节点，由图的 target_agent 路由。"""
-import json
 import re
-
 from src.base.agents_base import NodeKeyBase
 from src.mcp.client import get_rag_tools
 from src.supervisor_agent.graph_tool.graph import agents_graph
@@ -33,20 +31,8 @@ class RagSearchNode:
         tool = _pick_tool(tools, "rag_search")
         result = await tool.ainvoke({"user_input": content})
 
-        # MCP 返回 [{'type':'text','text':'JSON字符串'}]，拆出 content 给 doc 总结用
-        texts = []
-        metadata = []
-        for block in result:
-            try:
-                obj = json.loads(block.get("text") or "")
-                texts.append(obj.get("content") or "")
-                if obj.get("metadata"):
-                    metadata.append(obj["metadata"])
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                texts.append(str(block.get("text") or ""))
-
-        text = "\n\n".join([t for t in texts if t])
-        log.info(f"[RagSearchNode] 检索完成，返回 {len(text)} 字，元数据 {len(metadata)} 条")
+        text = str(result).strip()
+        log.info(f"[RagSearchNode] 检索完成，返回 {len(text)} 字")
 
         state["agent_outputs"] = {
             **state.get("agent_outputs", {}),
