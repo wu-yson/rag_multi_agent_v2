@@ -48,8 +48,11 @@ class AppSettings(BaseSettings):
 
     supervisor_agent_model: Optional[str] = "deepseek-v4-flash-0731"  # 主Agent使用模型：云端
 
-    # mcp配置__
+    # 本地 mcp配置__
     mcp_server_path: str = ""   # 不写死, 可设置根据需求设置路径
+
+
+
 
 
 settings = AppSettings()

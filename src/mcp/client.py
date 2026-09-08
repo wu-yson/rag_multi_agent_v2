@@ -1,91 +1,67 @@
-"""MCP 客户端连接层：常驻会话 + 加载工具"""
+"""MCP 客户端连接层：本地 stdio 客户端 + 工具加载。"""
 import asyncio
 import os
-from contextlib import AsyncExitStack
+from contextvars import ContextVar, Token
 
 from langchain_core.tools import StructuredTool
-
-from src.utils.logger import log
-from mcp import ClientSession, StdioServerParameters
+from mcp import StdioServerParameters
 from mcp.client.stdio import stdio_client
-from langchain_mcp_adapters.tools import load_mcp_tools
+
 from src.config.settings import settings
+from src.mcp.mcpclient_base import (
+    BaseMCPClient,
+    MCPClientConfig,
+)
+from src.utils.logger import log
 
-class MCPUnavailableError(RuntimeError):
-    """MCP 服务不可用时抛出"""
-    pass
+
+class StdioMCPClient(BaseMCPClient):
+    async def _open_transport(self, stack):
+        params = StdioServerParameters(
+            command=self.config.command,
+            args=self.config.args,
+        )
+        return await stack.enter_async_context(stdio_client(params))
 
 
-if not settings.mcp_server_path:
-    raise MCPUnavailableError("未配置 MCP_SERVER_PATH，请在 .env 中设置 MCP 服务端脚本路径")
-SERVER_PARAMS = StdioServerParameters(
-    command="python",
-    args=[settings.mcp_server_path],
+# ===== 本地工具白名单：按工具名过滤 =====
+DOC_TOOL_NAMES = {
+    'read_file', 'read_lines', 'write_file', 'append_file',
+    'replace_exact', 'replace_regex',
+    'read_docx', 'write_docx', 'read_xlsx', 'write_xlsx',
+    'list_dir', 'make_dir', 'glob_files', 'search_text',
+}
+RAG_TOOL_NAMES = {'rag_search', 'document_storage'}
+
+
+WEB_TOOL_NAMES = set("web_search")
+
+LOCAL_TOOL_NAMES = DOC_TOOL_NAMES | RAG_TOOL_NAMES | WEB_TOOL_NAMES
+
+local_mcp = StdioMCPClient(
+    MCPClientConfig(
+        name='local_mcp',
+        command='python',
+        args=[settings.mcp_server_path],
+        tool_whitelist=sorted(LOCAL_TOOL_NAMES),
+        timeout=60,
+    )
 )
 
-
-
-_tools_lock = asyncio.Lock()
-
-
-
-
-# 全局状态：会话只建一次，工具只加载一次
-_exit_stack: AsyncExitStack | None = None
-_tools: list | None = None
-_session: ClientSession | None = None
-
-# ===== 当前工具工作根（全局，单人使用无并发问题） =====
-_tool_root: str = ""
-
+# 当前请求的会话上下文，按 session_id 隔离。
+_current_session_id: ContextVar[str] = ContextVar('current_session_id', default='')
+# 每个会话对应的工作根目录，由 begin_request 写入。
+_session_roots: dict[str, str] = {}
 
 
 async def get_tools():
-    global _exit_stack, _tools, _session
-    if _tools is not None:
-        return _tools
+    """返回本地 MCP 已加载并通过白名单的工具。"""
+    return await local_mcp.get_tools()
 
-    async with _tools_lock:                       # 锁在最外层
-        if _tools is not None:                    # 双检
-            return _tools
-        try:
-            _exit_stack = AsyncExitStack()
-            read, write = await _exit_stack.enter_async_context(stdio_client(SERVER_PARAMS))
-            session = await _exit_stack.enter_async_context(ClientSession(read, write))
-            await asyncio.wait_for(session.initialize(), timeout=60)
-            _tools = await asyncio.wait_for(load_mcp_tools(session), timeout=60)
-            _session = session
-            return _tools
-        except Exception as e:
-            log.error(f"MCP 服务连接失败: {e}")
-            _exit_stack = None  # 新增：清掉，避免 close() 重复关闭已取消的连接
-            _tools = None
-            raise MCPUnavailableError(
-                    "MCP 工具服务未启动或连接失败，请先启动 MCP 服务"
-                ) from e
 
 async def close():
-    """关闭 MCP 连接（用完调用）"""
-    global _exit_stack, _tools, _session
-    if _exit_stack is not None:
-        try:
-            await _exit_stack.aclose()
-        except Exception as e:
-            log.warning(f"关闭 MCP 连接时忽略异常: {e}")
-        _exit_stack = None
-        _tools = None
-        _session = None
-
-
-
-# ===== 白名单：按工具名过滤 =====
-DOC_TOOL_NAMES = {
-    "read_file", "read_lines", "write_file", "append_file",
-    "replace_exact", "replace_regex",
-    "read_docx", "write_docx", "read_xlsx", "write_xlsx",
-    "list_dir", "make_dir", "glob_files", "search_text",
-}
-RAG_TOOL_NAMES = {"rag_search", "document_storage"}
+    """关闭本地 MCP 连接。"""
+    await local_mcp.close()
 
 
 async def get_doc_tools():
@@ -95,34 +71,40 @@ async def get_doc_tools():
 
 
 async def get_rag_tools():
-    """rag 检索/入库工具（白名单过滤 + 包装超时）"""
+    """rag 检索/入库工具（白名单过滤 + 包装超时）。"""
     tools = await get_tools()
     return [
-        _patch_tool_with_root(t, timeout=300 if t.name == "document_storage" else 90)
+        _patch_tool_with_root(t, timeout=300 if t.name == 'document_storage' else 90)
         for t in tools if t.name in RAG_TOOL_NAMES
     ]
 
 
-def set_workspace_root(session_id: str, path: str) -> None:
-    """记录当前窗口的文件操作根目录"""
-    global _tool_root
-    if path:
-        _tool_root = path
-        log.info(f"[MCP] 工作根: {path}")
+async def get_web_tools():
+    """Web Agent 本地搜索工具接入口。"""
 
+    tools = await get_tools()
+    return [_patch_tool_with_root(t) for t in tools if t.name in WEB_TOOL_NAMES]
+
+
+def set_workspace_root(session_id: str, path: str) -> None:
+    """记录当前窗口的文件操作根目录（纯本地，不再依赖 MCP 全局状态）。"""
+    # 接受 id 和路径存入字典里，做隔离。
+    _session_roots[session_id] = path
+    log.info(f"[MCP] 窗口 {session_id} 工作根: {path}")
 
 
 def _patch_tool_with_root(tool, timeout: float = 90):
-    """包装 MCP 工具：调用时若路径参数是相对路径，补全成当前工作根下的绝对路径"""
+    """包装 MCP 工具：调用时若 file_path 是相对路径，补全成当前窗口根下的绝对路径。"""
     async def _run(**kwargs):
         kwargs = dict(kwargs)
-        if _tool_root:
-            for key in ("file_path", "path", "root_dir", "dir_path"):
-                fp = kwargs.get(key)
-                if isinstance(fp, str) and fp and not os.path.isabs(fp):
-                    kwargs[key] = os.path.join(_tool_root, fp)
-                    break
+        sid = _current_session_id.get()
+        root = _session_roots.get(sid)
+        if root:
+            fp = kwargs.get("file_path")
+            if isinstance(fp, str) and not os.path.isabs(fp):
+                kwargs["file_path"] = os.path.join(root, fp)
         return await asyncio.wait_for(tool.ainvoke(kwargs), timeout=timeout)
+
     return StructuredTool.from_function(
         coroutine=_run,
         name=tool.name,
@@ -131,39 +113,14 @@ def _patch_tool_with_root(tool, timeout: float = 90):
     )
 
 
-def begin_request(session_id: str, workspace_path: str = "") -> None:
-    """请求入口：设置当前工具工作根"""
-    global _tool_root
+def begin_request(session_id: str, workspace_path: str = '') -> Token:
+    """请求入口：记录当前窗口 session + 路径，返回 token 供 finally 重置。"""
+    token = _current_session_id.set(session_id)
     if workspace_path:
-        _tool_root = workspace_path
+        _session_roots[session_id] = workspace_path
+    return token
 
 
-def end_request() -> None:
-    """请求结束"""
-    pass
-
-
-
-
-
-
-
-
-
-
-if __name__ == '__main__':
-    async def main():
-        try:
-            res = await get_tools()
-            print(len(res))
-            for i in res:
-                print("-", i.name)
-            doc = await get_doc_tools()
-            rag = await get_rag_tools()
-            print("doc 工具数:", len(doc), "| rag 工具数:", len(rag))
-        finally:
-            await close()   # 和 get_tools() 在同一个循环里
-
-    asyncio.run(main())     # 只开一个循环，建和关都在里面
-
-
+def end_request(token: Token) -> None:
+    """请求结束：重置上下文。"""
+    _current_session_id.reset(token)

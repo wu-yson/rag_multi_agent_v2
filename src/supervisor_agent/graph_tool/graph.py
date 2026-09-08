@@ -151,6 +151,8 @@ def _ensure_sub_agents_registered():
         from src.rag_agent.rag_agent import rag_storage_node  # noqa: F401  # noqa: F401
     if "doc_agent" not in agents_graph.sub_agents:
         from src.doc_agent.document_agent import doc_agent  # noqa: F401
+    if "web_agent" not in agents_graph.sub_agents:
+        from src.web_agent.web_agent import web_agent # noqa: F401
 
 
 class TaskItem(BaseModel):
@@ -170,6 +172,7 @@ class GraphInvokeTool(BaseTool):
         "调用内部多子Agent协同工作流；传入 task_messages 任务字典。"
         "知识库检索必须用 target_agent=rag_search；文档入库必须用 target_agent=rag_storage；"
         "本地文件读写、生成Word/Excel/Txt必须用 target_agent=doc_agent。"
+        "联网搜索、网页资料查询、最新信息检索必须用 target_agent=web_agent。"
     )
 
     def _build_summary(self, graph_state, normalized_tasks) -> str:

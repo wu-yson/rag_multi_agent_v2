@@ -16,6 +16,7 @@ class NodeKeyBase:
     RAG_SEARCH = "rag_search"  # 知识库检索节点(普通函数节点)
     RAG_STORAGE = "rag_storage"  # 文档入库节点(普通函数节点)
     DOC_AGENT = "doc_agent"
+    WEB_AGENT = "web_agent"
 
 
 

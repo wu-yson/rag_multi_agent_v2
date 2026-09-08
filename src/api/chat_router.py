@@ -29,8 +29,9 @@ async def chat_api(body: ChatBody):
     """ 对话接口 """
 
     async def event_generator():
+        token = None
         try:
-            begin_request(body.session_id, body.workspace_path or "")
+            token = begin_request(body.session_id, body.workspace_path or "")
             memory = CommonMemory(session_id=body.session_id)
             agent = SupervisorAgent(memory=memory)
 
@@ -48,7 +49,8 @@ async def chat_api(body: ChatBody):
             log.exception("流式接口异常")
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         finally:
-            end_request()
+            if token is not None:
+                end_request(token)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
