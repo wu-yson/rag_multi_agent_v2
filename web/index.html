@@ -714,6 +714,11 @@
         if (!isRunning && m.usage) {
           var totalTok = (m.usage.prompt_tokens || 0) + (m.usage.completion_tokens || 0);
           var tokText = ' \u00A0|\u00A0 \u6D88\u8017\uFF1A' + totalTok.toLocaleString() + ' tokens';
+          var cachedTok = m.usage.cached_tokens || 0;
+          if (cachedTok > 0 && (m.usage.prompt_tokens || 0) > 0) {
+            var pct = Math.round(cachedTok / m.usage.prompt_tokens * 100);
+            tokText += ' \u00A0|\u00A0 \u7F13\u5B58\u547D\u4E2D\u7387: ' + pct + '%';
+          }
         } else {
           var tokText = '';
         }

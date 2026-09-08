@@ -4,7 +4,7 @@ from src.llm.resilience import build_agent_middleware
 from src.config.settings import settings
 from src.utils.logger import log
 from typing import Optional, Any
-
+from langchain_community.callbacks import get_openai_callback
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessageChunk, AIMessage
 
@@ -105,6 +105,15 @@ class SupervisorAgent(BaseAgentTemplate):
             log.error(f" [TopSupervisor] 安全检测返回内容JSON解析失败，内容：{raw_content}")
             return False
 
+    def _get_cached_tokens(self, messages_response):
+        """从响应元数据里提取缓存命中数"""
+        total = 0
+        for msg in messages_response:
+            if hasattr(msg, 'response_metadata') and msg.response_metadata:
+                usage = msg.response_metadata.get('token_usage', {})
+                details = usage.get('prompt_tokens_details', {})
+                total += details.get('cached_tokens', 0)
+        return total
 
     def _save_memory(self, user_input: str, full_text: list[str], all_msgs: list[BaseMessage]):
         """保存本轮 human / ai / tool 到记忆"""
@@ -138,39 +147,38 @@ class SupervisorAgent(BaseAgentTemplate):
 
             full_text: list[str] = []
             all_msgs: list[BaseMessage] = []          # 收集所有消息（含工具消息）
-            async for message, _meta in agent.astream(
-                {"messages": messages},
-                stream_mode="messages",
-                config={"recursion_limit": 8},
-            ):
-                all_msgs.append(message)
 
-                if isinstance(message, AIMessageChunk):
-                    reasoning = message.additional_kwargs.get(
-                        'reasoning_content') if message.additional_kwargs else None
-                    if reasoning:
-                        yield 'thinking', str(reasoning)
-                    if message.content:
-                        chunk = str(message.content)
-                        full_text.append(chunk)
-                        yield 'content', chunk
+            with get_openai_callback() as cb:
+                async for message, _meta in agent.astream(
+                        {"messages": messages},
+                        stream_mode="messages",
+                        config={"recursion_limit": 8},
+                ):
+                    all_msgs.append(message)
+
+                    if isinstance(message, AIMessageChunk):
+                        reasoning = message.additional_kwargs.get(
+                            'reasoning_content') if message.additional_kwargs else None
+                        if reasoning:
+                            yield 'thinking', str(reasoning)
+                        if message.content:
+                            chunk = str(message.content)
+                            full_text.append(chunk)
+                            yield 'content', chunk
 
             log.info(f"[TopSupervisor] 顶层Agent推理完成")
+
+            # 计算缓存
+            cached = self._get_cached_tokens(all_msgs)
+            log.info(f"[Token] prompt={cb.prompt_tokens}, completion={cb.completion_tokens}, cached={cached}, total={cb.total_tokens}")
             self._save_memory(user_input, full_text, all_msgs)
 
-            # 统计 token 消耗
-            total_input = "".join([str(m.content) for m in messages if hasattr(m, 'content')])
-            total_output = "".join(full_text)
-            try:
-                import tiktoken
-                enc = tiktoken.get_encoding("cl100k_base")
-                input_tokens = len(enc.encode(total_input))
-                output_tokens = len(enc.encode(total_output))
-            except:
-                # tiktoken 不可用时粗估
-                input_tokens = len(total_input) // 2
-                output_tokens = len(total_output) // 2
-            yield ('usage', {'prompt_tokens': input_tokens, 'completion_tokens': output_tokens})
+            # callback 自动统计了主 Agent + 所有子 Agent 的 LLM 调用
+            yield ('usage', {
+                'prompt_tokens': cb.prompt_tokens,
+                'completion_tokens': cb.completion_tokens,
+                'cached_tokens': cached
+            })
 
 
         except Exception as e:
