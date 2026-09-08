@@ -29,20 +29,26 @@ async def chat_api(body: ChatBody):
     """ 对话接口 """
 
     async def event_generator():
-        token = None
         try:
-            token = begin_request(body.session_id, body.workspace_path or "")
-
+            begin_request(body.session_id, body.workspace_path or "")
             memory = CommonMemory(session_id=body.session_id)
             agent = SupervisorAgent(memory=memory)
-            async for chunk in agent.astream(body.query, tmp_model=body.model):
-                yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+
+            query = body.query
+            if body.workspace_path:
+                query = f"[当前工作目录：{body.workspace_path}]\n\n{query}"
+
+            async for item in agent.astream(query, tmp_model=body.model):
+                if isinstance(item, tuple):
+                    chunk_type, chunk_data = item
+                    yield f"data: {json.dumps({chunk_type: chunk_data}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'content': item}, ensure_ascii=False)}\n\n"
         except Exception as e:
             log.exception("流式接口异常")
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         finally:
-            if token is not None:
-                end_request(token)
+            end_request()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

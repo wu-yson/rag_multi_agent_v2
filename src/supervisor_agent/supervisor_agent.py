@@ -129,7 +129,7 @@ class SupervisorAgent(BaseAgentTemplate):
             if settings.agent_security_check:
                 is_attack = await self._security_detect(user_input)
                 if is_attack:
-                    yield "此为用户输入被拦截（攻击行为）, 结束本次会话"
+                    yield 'content', "此为用户输入被拦截（攻击行为）, 结束本次会话"
                     return
 
             messages = self._build_messages(user_input)
@@ -145,18 +145,39 @@ class SupervisorAgent(BaseAgentTemplate):
             ):
                 all_msgs.append(message)
 
-                if isinstance(message, AIMessageChunk) and message.content:
-                    chunk = str(message.content)
-                    full_text.append(chunk)
-                    yield chunk
+                if isinstance(message, AIMessageChunk):
+                    reasoning = message.additional_kwargs.get(
+                        'reasoning_content') if message.additional_kwargs else None
+                    if reasoning:
+                        yield 'thinking', str(reasoning)
+                    if message.content:
+                        chunk = str(message.content)
+                        full_text.append(chunk)
+                        yield 'content', chunk
 
             log.info(f"[TopSupervisor] 顶层Agent推理完成")
             self._save_memory(user_input, full_text, all_msgs)
+
+            # 统计 token 消耗
+            total_input = "".join([str(m.content) for m in messages if hasattr(m, 'content')])
+            total_output = "".join(full_text)
+            try:
+                import tiktoken
+                enc = tiktoken.get_encoding("cl100k_base")
+                input_tokens = len(enc.encode(total_input))
+                output_tokens = len(enc.encode(total_output))
+            except:
+                # tiktoken 不可用时粗估
+                input_tokens = len(total_input) // 2
+                output_tokens = len(total_output) // 2
+            yield ('usage', {'prompt_tokens': input_tokens, 'completion_tokens': output_tokens})
+
+
         except Exception as e:
             log.error(f" [TopSupervisor] 流式调用失败: {e}", exc_info=True)
             if self.config.debug_mode:
                 raise RuntimeError(e) from e
-            yield f"智能体调用失败: {e}"
+            yield 'content', f"智能体调用失败: {e}"
 
 
     def ainvoke_wrapper(self, state: GraphState) -> GraphState:

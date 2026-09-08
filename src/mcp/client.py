@@ -1,6 +1,5 @@
 """MCP 客户端连接层：常驻会话 + 加载工具"""
 import asyncio
-import contextvars
 import os
 from contextlib import AsyncExitStack
 
@@ -36,9 +35,8 @@ _exit_stack: AsyncExitStack | None = None
 _tools: list | None = None
 _session: ClientSession | None = None
 
-# ===== 窗口路径隔离：session_id -> 工作根 =====
-_current_session_id: contextvars.ContextVar[str] = contextvars.ContextVar("current_session_id", default="")
-_session_roots: dict[str, str] = {}
+# ===== 当前工具工作根（全局，单人使用无并发问题） =====
+_tool_root: str = ""
 
 
 
@@ -106,22 +104,24 @@ async def get_rag_tools():
 
 
 def set_workspace_root(session_id: str, path: str) -> None:
-    """记录当前窗口的文件操作根目录（纯本地，不再依赖 MCP 全局状态）"""
-    _session_roots[session_id] = path
-    log.info(f"[MCP] 窗口 {session_id} 工作根: {path}")
+    """记录当前窗口的文件操作根目录"""
+    global _tool_root
+    if path:
+        _tool_root = path
+        log.info(f"[MCP] 工作根: {path}")
 
 
 
 def _patch_tool_with_root(tool, timeout: float = 90):
-    """包装 MCP 工具：调用时若 file_path 是相对路径，补全成当前窗口根下的绝对路径"""
+    """包装 MCP 工具：调用时若路径参数是相对路径，补全成当前工作根下的绝对路径"""
     async def _run(**kwargs):
         kwargs = dict(kwargs)
-        sid = _current_session_id.get()
-        root = _session_roots.get(sid)
-        if root:
-            fp = kwargs.get("file_path")
-            if isinstance(fp, str) and not os.path.isabs(fp):
-                kwargs["file_path"] = os.path.join(root, fp)
+        if _tool_root:
+            for key in ("file_path", "path", "root_dir", "dir_path"):
+                fp = kwargs.get(key)
+                if isinstance(fp, str) and fp and not os.path.isabs(fp):
+                    kwargs[key] = os.path.join(_tool_root, fp)
+                    break
         return await asyncio.wait_for(tool.ainvoke(kwargs), timeout=timeout)
     return StructuredTool.from_function(
         coroutine=_run,
@@ -131,17 +131,16 @@ def _patch_tool_with_root(tool, timeout: float = 90):
     )
 
 
-def begin_request(session_id: str, workspace_path: str = "") -> contextvars.Token:
-    """请求入口：记录当前窗口 session + 路径，返回 token 供 finally 重置"""
-    token = _current_session_id.set(session_id)
+def begin_request(session_id: str, workspace_path: str = "") -> None:
+    """请求入口：设置当前工具工作根"""
+    global _tool_root
     if workspace_path:
-        _session_roots[session_id] = workspace_path
-    return token
+        _tool_root = workspace_path
 
 
-def end_request(token: contextvars.Token) -> None:
-    """请求结束：重置上下文"""
-    _current_session_id.reset(token)
+def end_request() -> None:
+    """请求结束"""
+    pass
 
 
 
