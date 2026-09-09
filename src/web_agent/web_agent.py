@@ -1,33 +1,27 @@
-from src.mcp.client import get_web_tools
-from src.prompts import get_prompt
-from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, NodeKeyBase
+"""Web 搜索节点：纯执行，不用 LLM。直接调 MCP web_search 工具。"""
+from src.base.agents_base import NodeKeyBase, run_node
+from src.mcp.client import get_web_tools, pick_tool
 from src.supervisor_agent.graph_tool.graph import agents_graph
+from src.utils.logger import log
 
 
-class WebAgent(BaseAgentTemplate):
-    """联网搜索智能体。"""
+class WebSearchNode:
+    """联网搜索节点：把任务内容作为 query 直接调用 web_search。"""
+    output_key = NodeKeyBase.WEB_SEARCH
 
-    def __init__(self):
-        cfg = BaseAgentConfig()
-        super().__init__(config=cfg)
+    async def ainvoke_wrapper(self, state):
+        return await run_node(state, self.output_key, self._web_search)
 
-    @property
-    def system_prompt(self) -> str:
-        if self._system_prompt is None:
-            self._system_prompt = get_prompt('web_agent_prompt')
-        return self._system_prompt
+    async def _web_search(self, content):
+        tools = await get_web_tools()
+        tool = pick_tool(tools, "web_search")
+        result = await tool.ainvoke({"query": content})
 
-    async def _load_tools(self):
-        """web 工具从 MCP 加载"""
-        return await get_web_tools()
-
-    @property
-    def output_key(self) -> str:
-        return NodeKeyBase.WEB_AGENT
-
-    def _get_error_tip(self) -> str:
-        return '联网搜索服务暂时不可用，请稍后重试'
+        text = str(result).strip()
+        log.info(f"[WebSearchNode] 搜索完成，返回 {len(text)} 字")
+        return text
 
 
-web_agent = WebAgent()
-agents_graph.register_sub_agent(web_agent.output_key, web_agent)
+# 图节点注册
+web_search_node = WebSearchNode()
+agents_graph.register_sub_agent(web_search_node.output_key, web_search_node)

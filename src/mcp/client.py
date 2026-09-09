@@ -34,7 +34,7 @@ DOC_TOOL_NAMES = {
 RAG_TOOL_NAMES = {'rag_search', 'document_storage'}
 
 
-WEB_TOOL_NAMES = set("web_search")
+WEB_TOOL_NAMES = {'web_search'}  # 集合元素要存整个工具名，而不是拆成单字符
 
 LOCAL_TOOL_NAMES = DOC_TOOL_NAMES | RAG_TOOL_NAMES | WEB_TOOL_NAMES
 
@@ -80,10 +80,18 @@ async def get_rag_tools():
 
 
 async def get_web_tools():
-    """Web Agent 本地搜索工具接入口。"""
+    """Web_检索 本地搜索工具接入口。"""
 
     tools = await get_tools()
     return [_patch_tool_with_root(t) for t in tools if t.name in WEB_TOOL_NAMES]
+
+
+def pick_tool(tools, name):
+    """按名字从工具列表里取一个工具，取不到抛错。"""
+    for t in tools:
+        if t.name == name:
+            return t
+    raise RuntimeError(f"MCP 未提供工具: {name}")
 
 
 def set_workspace_root(session_id: str, path: str) -> None:

@@ -1,16 +1,9 @@
 """知识库节点：纯执行，不用 LLM。检索 / 入库拆成两个节点，由图的 target_agent 路由。"""
 import re
-from src.base.agents_base import NodeKeyBase
-from src.mcp.client import get_rag_tools
+from src.base.agents_base import NodeKeyBase, run_node
+from src.mcp.client import get_rag_tools, pick_tool
 from src.supervisor_agent.graph_tool.graph import agents_graph
 from src.utils.logger import log
-
-
-def _pick_tool(tools, name):
-    for t in tools:
-        if t.name == name:
-            return t
-    raise RuntimeError(f"MCP 未提供工具: {name}")
 
 
 def _extract_dir_path(content: str) -> str:
@@ -24,27 +17,16 @@ class RagSearchNode:
     output_key = NodeKeyBase.RAG_SEARCH
 
     async def ainvoke_wrapper(self, state):
-        task = state["task_messages"][str(state["current_task_id"])]
-        content = task.get("task_content", "")
+        return await run_node(state, self.output_key, self._rag_search)
 
+    async def _rag_search(self, content):
         tools = await get_rag_tools()
-        tool = _pick_tool(tools, "rag_search")
+        tool = pick_tool(tools, "rag_search")
         result = await tool.ainvoke({"user_input": content})
 
         text = str(result).strip()
         log.info(f"[RagSearchNode] 检索完成，返回 {len(text)} 字")
-
-        state["agent_outputs"] = {
-            **state.get("agent_outputs", {}),
-            str(state["current_task_id"]): {
-                "target_agent": self.output_key,
-                "result": text,
-                "error": "",
-            },
-        }
-        state["current_task_id"] = None
-        state["runtime_task_inputs"] = []
-        return state
+        return text
 
 
 class RagStorageNode:
@@ -52,26 +34,17 @@ class RagStorageNode:
     output_key = NodeKeyBase.RAG_STORAGE
 
     async def ainvoke_wrapper(self, state):
-        task = state["task_messages"][str(state["current_task_id"])]
-        content = task.get("task_content", "")
+        return await run_node(state, self.output_key, self._rag_storage)
 
+    async def _rag_storage(self, content):
         tools = await get_rag_tools()
-        tool = _pick_tool(tools, "document_storage")
+        tool = pick_tool(tools, "document_storage")
         dir_path = _extract_dir_path(content)
         result = await tool.ainvoke({"dir_path": dir_path})
 
-        state["agent_outputs"] = {
-            **state.get("agent_outputs", {}),
-            str(state["current_task_id"]): {
-                "target_agent": self.output_key,
-                "result": result,
-                "error": "",
-            },
-        }
-        state["current_task_id"] = None
-        state["runtime_task_inputs"] = []
-        log.info(f"[RagStorageNode] 入库结果: {str(result)[:120]}")
-        return state
+        text = str(result).strip()
+        log.info(f"[RagStorageNode] 入库结果: {text[:120]}")
+        return text
 
 
 # 图节点注册

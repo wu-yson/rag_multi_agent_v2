@@ -6,7 +6,7 @@ supervisor_agent_prompt = """
 - rag_search：知识库检索
 - rag_storage：文档入库
 - doc_agent：本地文件读写
-- web_agent：联网搜索, 网页资料查询、最新信息检索
+- web_search：联网搜索, 网页资料查询、最新信息检索
 
 
 【职责】
@@ -22,7 +22,7 @@ supervisor_agent_prompt = """
    - 知识库检索 -> target_agent=rag_search
    - 文档入库 -> target_agent=rag_storage
    - 本地文件读取、生成Word/Excel/Txt -> target_agent=doc_agent
-   - 联网搜索、最新信息、新闻、外部文档、官方资料查询 -> target_agent=web_agent
+   - 联网搜索、最新信息、新闻、外部文档、官方资料查询 -> target_agent=web_search
 5. 任务规划约束：
    - 单一子Agent能完成的请求，只创建一条任务，不要为了形式拆成多步。
    - 只有跨子Agent协作时才建立依赖，例如需要先检索知识库、再生成文档。
