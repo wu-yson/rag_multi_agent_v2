@@ -101,8 +101,27 @@ def set_workspace_root(session_id: str, path: str) -> None:
     log.info(f"[MCP] 窗口 {session_id} 工作根: {path}")
 
 
+
+def _tool_result_to_text(result):
+    """MCP 工具返回值（content-block 列表）统一转成纯文本。
+
+    MCP 协议要求工具结果以 content-block 数组传输，客户端拿到的形如
+    [{'type': 'text', 'text': '...', 'id': '...'}]；这里把 text 抽出来，
+    让节点 / Agent 直接拿到干净文本。非列表（如已是字符串）则原样转字符串。
+    """
+    if isinstance(result, list):
+        parts = []
+        for item in result:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+            else:
+                parts.append(str(item))
+        return "\n".join(p for p in parts if p)
+    return str(result)
+
+
 def _patch_tool_with_root(tool, timeout: float = 90):
-    """包装 MCP 工具：调用时若 file_path 是相对路径，补全成当前窗口根下的绝对路径。"""
+    """包装 MCP 工具：file_path 相对路径补全 + 超时 + 返回值 content-block 转纯文本。"""
     async def _run(**kwargs):
         kwargs = dict(kwargs)
         sid = _current_session_id.get()
@@ -111,7 +130,8 @@ def _patch_tool_with_root(tool, timeout: float = 90):
             fp = kwargs.get("file_path")
             if isinstance(fp, str) and not os.path.isabs(fp):
                 kwargs["file_path"] = os.path.join(root, fp)
-        return await asyncio.wait_for(tool.ainvoke(kwargs), timeout=timeout)
+        result = await asyncio.wait_for(tool.ainvoke(kwargs), timeout=timeout)
+        return _tool_result_to_text(result)
 
     return StructuredTool.from_function(
         coroutine=_run,
