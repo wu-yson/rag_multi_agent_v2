@@ -38,6 +38,9 @@ WEB_TOOL_NAMES = {'web_search'}  # 集合元素要存整个工具名，而不是
 
 LOCAL_TOOL_NAMES = DOC_TOOL_NAMES | RAG_TOOL_NAMES | WEB_TOOL_NAMES
 
+# 各工具中代表路径的参数名，按当前会话根目录补齐相对路径。
+PATH_PARAM_NAMES = ("file_path", "path", "root_dir", "dir_path")
+
 local_mcp = StdioMCPClient(
     MCPClientConfig(
         name='local_mcp',
@@ -121,15 +124,16 @@ def _tool_result_to_text(result):
 
 
 def _patch_tool_with_root(tool, timeout: float = 90):
-    """包装 MCP 工具：file_path 相对路径补全 + 超时 + 返回值 content-block 转纯文本。"""
+    """包装 MCP 工具：路径参数相对路径补全 + 超时 + 返回值 content-block 转纯文本。"""
     async def _run(**kwargs):
         kwargs = dict(kwargs)
         sid = _current_session_id.get()
         root = _session_roots.get(sid)
         if root:
-            fp = kwargs.get("file_path")
-            if isinstance(fp, str) and not os.path.isabs(fp):
-                kwargs["file_path"] = os.path.join(root, fp)
+            for key in PATH_PARAM_NAMES:
+                value = kwargs.get(key)
+                if isinstance(value, str) and value and not os.path.isabs(value):
+                    kwargs[key] = os.path.join(root, value)
         result = await asyncio.wait_for(tool.ainvoke(kwargs), timeout=timeout)
         return _tool_result_to_text(result)
 

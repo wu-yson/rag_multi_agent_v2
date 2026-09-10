@@ -126,7 +126,8 @@ class CommonMemory:
                     single_token = token_num  # 本条消息的token数量
                 ))
                 session.commit()
-                log.info(f"[memory]写入记忆成功：{content}")
+                log_content = content if len(content) <= 500 else content[:500] + "..."
+                log.info(f"[memory]写入记忆成功：{log_content}")
         except Exception as e:
             log.error(f"[memory]写入记忆失败：{e}")
 
@@ -161,6 +162,22 @@ class CommonMemory:
             result = [{"role": i.role, "content": i.content} for i in queue]
             log.info(f"[memory]获取记忆成功：{result}")
             return result
+
+    def get_tool_records(self, limit: int = 50) -> List[str]:
+        """获取当前会话的tool历史记录，不受上下文token窗口限制"""
+        with Session(self.engine) as session:
+            try:
+                rows = session.exec(
+                    select(ChatRecord)
+                    .where(ChatRecord.session_id == self.session_id)
+                    .where(ChatRecord.role == "tool")
+                    .order_by(ChatRecord.id.desc())
+                    .limit(limit)
+                ).all()
+            except Exception as e:
+                log.error(f"[memory]获取tool历史失败：{e}")
+                return []
+            return [row.content for row in rows]
 
     def delete_session(self):
         """清空当前会话, 谨慎使用"""

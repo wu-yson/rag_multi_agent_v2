@@ -1,7 +1,7 @@
 
 import asyncio
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
@@ -11,6 +11,8 @@ from src.utils.logger import log
 
 
 SUB_AGENT_TIMEOUT = 300
+# 日志中单条任务结果的预览字数
+LOG_PREVIEW_CHARS = 500
 
 
 class MultiAgentWorkflow:
@@ -90,8 +92,15 @@ class MultiAgentWorkflow:
                     "result": "",
                     "error": f"子Agent执行超时（>{SUB_AGENT_TIMEOUT}秒）"
                 }
+            except Exception as e:
+                log.error(f"[Graph] 子agent {task['target_agent']} 任务{tid} 异常: {e}", exc_info=True)
+                outputs[str(tid)] = {
+                    "target_agent": task['target_agent'],
+                    "result": "",
+                    "error": f"子Agent执行异常: {e}"
+                }
         running = set()
-        while len(started) < len(task_messages):
+        while running or len(started) < len(task_messages):
             for tid in task_messages:
                 if tid not in started and deps_satisfied(tid):
                     started.add(tid)
@@ -100,6 +109,10 @@ class MultiAgentWorkflow:
                 raise RuntimeError(f"任务依赖无法满足: {[t for t in task_messages if t not in started]}")
             await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)  # ③ 等一个完成
             running = {t for t in running if not t.done()}  # 清掉已完成的，留还在跑的
+        missing = [t for t in task_messages if str(t) not in outputs]
+        if missing:
+            log.error(f"[Graph] 任务结果不完整，缺失: {missing}")
+            raise RuntimeError(f"任务结果不完整，缺失: {missing}")
         return outputs
 
 
@@ -168,6 +181,7 @@ class GraphInvokeTool(BaseTool):
     """ 图工具接口 """
     name: str = "graph_invoke"
     args_schema: type[WorkflowPlan] = WorkflowPlan
+    response_format: Literal["content", "content_and_artifact"] = "content_and_artifact"
     description: str = (
         "调用内部多子Agent协同工作流；传入 task_messages 任务字典。"
         "知识库检索必须用 target_agent=rag_search；文档入库必须用 target_agent=rag_storage；"
@@ -189,17 +203,20 @@ class GraphInvokeTool(BaseTool):
         for task_id in sorted(agent_outputs, key=lambda x: int(x) if x.isdigit() else x):
             item = agent_outputs[task_id]
             full = item.get("error") or item.get("result") or "无输出"
-            log.info(f"[GraphTool] task {task_id} 完整结果: {full}")
+            log_result = full if len(full) <= LOG_PREVIEW_CHARS else full[:LOG_PREVIEW_CHARS] + "..."
+            log.info(f"[GraphTool] task {task_id} 完整结果: {log_result}")
             if str(task_id) in depended:
                 status = "失败" if item.get("error") else "成功"
-                summary_parts.append(f"task {task_id}：{status}")
+                agent_name = item.get("target_agent", "")
+                summary_parts.append(f"task {task_id}（{agent_name}）：{status}")
             else:
                 summary_parts.append(f"task {task_id} 输出：{full}")
         summary_text = "\n".join(summary_parts)
-        log.info(f"[GraphTool] 返回给主Agent的汇总:\n{summary_text}")
+        log_summary = summary_text if len(summary_text) <= LOG_PREVIEW_CHARS else summary_text[:LOG_PREVIEW_CHARS] + "..."
+        log.info(f"[GraphTool] 返回给主Agent的汇总:\n{log_summary}")
         return summary_text
 
-    async def _arun(self, task_messages: dict) -> str:
+    async def _arun(self, task_messages: dict) -> tuple[str, dict]:
         normalized_tasks = {
             str(k): (v.model_dump() if isinstance(v, TaskItem) else v)
             for k, v in task_messages.items()
@@ -207,7 +224,8 @@ class GraphInvokeTool(BaseTool):
         try:
             log.info(f"[GraphTool] 主Agent拆解任务：{json.dumps(normalized_tasks, ensure_ascii=False)}")
             graph_state = await agents_graph.ainvoke(task_messages=normalized_tasks)
-            return self._build_summary(graph_state, normalized_tasks)
+            summary = self._build_summary(graph_state, normalized_tasks)
+            return summary, graph_state.get("agent_outputs", {})
         except Exception as e:
             log.error(f"[GraphTool] 多Agent工作流执行异常，错误信息：{str(e)}", exc_info=True)
             raise

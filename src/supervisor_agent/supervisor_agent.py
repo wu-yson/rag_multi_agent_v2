@@ -7,12 +7,17 @@ from typing import Optional, Any
 from langchain_community.callbacks import get_openai_callback
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessageChunk, AIMessage
+from langchain_core.tools import StructuredTool
 
 from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, GraphState
 from src.llm.factory import llm_factory
 from src.memory.memory import CommonMemory
 from src.prompts import get_prompt
 from src.supervisor_agent.graph_tool.graph import graph_invoke
+
+
+# 单次返回给主Agent的历史任务结果最大字符数
+TASK_RESULT_MAX_CHARS = 5000
 
 
 
@@ -38,6 +43,8 @@ class SupervisorAgent(BaseAgentTemplate):
     def tools(self) -> list[Any]:
         if self._tools is None:
             self._tools = [graph_invoke]
+            if self._memory:
+                self._tools.append(self._build_task_result_tool())
         return self._tools
 
     async def _get_agent(
@@ -124,6 +131,46 @@ class SupervisorAgent(BaseAgentTemplate):
                 if isinstance(msg, ToolMessage):
                     tool_content = msg.content if isinstance(msg.content, str) else str(msg.content)
                     self._memory.add(role="tool", content=tool_content)
+                    if msg.artifact is not None:
+                        self._memory.add(
+                            role="tool",
+                            content=json.dumps(
+                                {"__kind__": "graph_result", "tasks": msg.artifact},
+                                ensure_ascii=False,
+                            ),
+                        )
+
+    def _build_task_result_tool(self) -> StructuredTool:
+        """按task_id查询历史子任务完整结果的主Agent工具"""
+        async def _read_task_result(task_id: str) -> str:
+            task_id = str(task_id).strip()
+            if not task_id:
+                return "task_id不能为空"
+            for content in self._memory.get_tool_records():
+                try:
+                    record = json.loads(content)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(record, dict) or record.get("__kind__") != "graph_result":
+                    continue
+                task = (record.get("tasks") or {}).get(task_id)
+                if not task:
+                    continue
+                agent_name = task.get("target_agent", "")
+                text = task.get("error") or task.get("result") or "无输出"
+                if len(text) > TASK_RESULT_MAX_CHARS:
+                    text = text[:TASK_RESULT_MAX_CHARS] + "\n...（内容过长，已截断）"
+                return f"task {task_id}（{agent_name}）完整结果：\n{text}"
+            return f"未找到 task {task_id} 的历史执行结果"
+
+        return StructuredTool.from_function(
+            coroutine=_read_task_result,
+            name="read_task_result",
+            description=(
+                "按 task_id 查询此前多子Agent工作流中某个任务的完整执行结果。"
+                "仅当用户追问历史任务（尤其是中间节点）的详细内容时调用，不要用它重新执行任务。"
+            ),
+        )
 
     async def astream(
         self,
