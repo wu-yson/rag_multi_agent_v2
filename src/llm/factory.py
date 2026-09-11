@@ -65,7 +65,7 @@ class GLMNProvider:
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
                 temperature=self.config.temperature,
-                reasoning_effort="high",
+                reasoning_effort=settings.llm_reasoning_effort,
                 max_retries=1,
             )
         else:
@@ -99,7 +99,8 @@ class QWENProvider:
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
                 temperature=self.config.temperature,
-                reasoning_effort="high",
+                reasoning_effort=settings.llm_reasoning_effort,
+                extra_body={"enable_thinking": settings.llm_enable_thinking},
                 max_retries=1,
             )
         else:

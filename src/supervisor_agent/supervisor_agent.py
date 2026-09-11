@@ -113,13 +113,24 @@ class SupervisorAgent(BaseAgentTemplate):
             return False
 
     def _get_cached_tokens(self, messages_response):
-        """从响应元数据里提取缓存命中数"""
+        """统计缓存命中的输入 token（Prompt Caching）。
+
+        兼容两种来源：
+        1) langchain 标准 usage_metadata.input_token_details.cache_read（流式 chunk 常走这条）
+        2) OpenAI 兼容格式 response_metadata.token_usage.prompt_tokens_details.cached_tokens
+        同一条消息只取其一，避免重复计数。
+        """
         total = 0
         for msg in messages_response:
-            if hasattr(msg, 'response_metadata') and msg.response_metadata:
-                usage = msg.response_metadata.get('token_usage', {})
-                details = usage.get('prompt_tokens_details', {})
-                total += details.get('cached_tokens', 0)
+            cached = 0
+            um = getattr(msg, "usage_metadata", None) or {}
+            cached = (um.get("input_token_details") or {}).get("cache_read", 0) or 0
+            if not cached:
+                rmeta = getattr(msg, "response_metadata", None) or {}
+                usage = rmeta.get("token_usage", {}) or {}
+                details = usage.get("prompt_tokens_details", {}) or {}
+                cached = details.get("cached_tokens", 0) or 0
+            total += cached
         return total
 
     def _save_memory(self, user_input: str, full_text: list[str], all_msgs: list[BaseMessage]):
@@ -212,6 +223,12 @@ class SupervisorAgent(BaseAgentTemplate):
                             chunk = str(message.content)
                             full_text.append(chunk)
                             yield 'content', chunk
+
+            if not full_text:
+                log.warning(" [TopSupervisor] 模型未返回正文内容（输出可能被思考占用），已回退为提示语")
+                fallback_text = "模型本次未返回有效内容（输出可能被内部思考占用），请重试或换一种问法。"
+                full_text.append(fallback_text)
+                yield 'content', fallback_text
 
             log.info(f"[TopSupervisor] 顶层Agent推理完成")
 

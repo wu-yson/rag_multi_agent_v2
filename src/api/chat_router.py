@@ -19,7 +19,7 @@ async def list_models():
     return {
         "code": 200,
         "data": chat_models,
-        "default_model": settings.agent_default_model,  # 新增：默认模型名
+        "default_model": settings.supervisor_agent_model,  # 下拉框默认项 = 主Agent模型
     }
 
 

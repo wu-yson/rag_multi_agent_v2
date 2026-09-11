@@ -1,5 +1,7 @@
 
 
+import asyncio
+
 from src.llm.resilience import build_agent_middleware
 from src.utils.logger import log
 from dataclasses import dataclass
@@ -116,7 +118,17 @@ class BaseAgentTemplate:
         log.info(f"[SubAgentInner][{self.output_key}] 开始调用Agent推理")
         try:
             agent = await self.get_agent()
-            resp = await agent.ainvoke({"messages": messages})
+            try:
+                resp = await asyncio.wait_for(
+                    agent.ainvoke({"messages": messages}),
+                    timeout=settings.subagent_timeout,
+                )
+            except asyncio.TimeoutError:
+                log.error(
+                    f"[SubAgentInner][{self.output_key}] 模型调用超过 "
+                    f"{settings.subagent_timeout} 秒未返回，已中止本次任务"
+                )
+                return self._get_error_tip()
 
             msg_list = resp["messages"]
             last_msg = msg_list[-1]

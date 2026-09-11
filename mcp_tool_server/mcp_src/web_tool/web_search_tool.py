@@ -37,6 +37,9 @@ _WEAK_TERMS = (
 # 型号/数字/字母等"强特征词"的正则（如 18、fold），用于降级识别
 _STRONG_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
+# 查询词分隔符：空格与常见中英文标点（用于把中文查询切成核心词）
+_TERM_SEPARATOR_RE = re.compile(r"[\s,，、;；:：/\\|+&()（）\[\]【】<>《》“”‘’]+")
+
 
 def _build_bing_params(query: str, region: str, max_results: int) -> dict:
     """把 region（如 cn-zh / us-en）转成 Bing 的地区/语言参数。"""
@@ -114,32 +117,72 @@ def _query_strong_tokens(query: str) -> list:
     return [token.lower() for token in _STRONG_TOKEN_RE.findall(query) if len(token) >= 2]
 
 
-def _is_degraded(query: str, results: list) -> bool:
-    """判断结果是否为 Bing 的"品牌泛页"降级结果。
+def _strip_weak_terms(text: str) -> str:
+    """去掉参数/价格/最新/推荐等泛词，只保留核心词。"""
+    cleaned = text
+    for word in sorted(_WEAK_TERMS, key=len, reverse=True):
+        cleaned = cleaned.replace(word, " ")
+    return re.sub(r"\s+", " ", cleaned).strip()
 
-    规则：搜索词里含有型号/数字等强特征词时，若所有结果的标题/链接都匹配不到
-    任何一个强特征词，说明返回的多是与查询无关的品牌门户页，判为降级。
+
+def _query_core_terms(query: str) -> list:
+    """提取查询核心词（中英文通用，用于泛页识别）。
+
+    先去掉泛词，再按空格/标点切分成片段，保留长度 >= 2 的词。
+    例："工程资料管理 最新规范 要求 方法" -> ["工程资料管理", "规范", "要求", "方法"]
     """
-    tokens = _query_strong_tokens(query)
-    if not tokens:
+    cleaned = _strip_weak_terms(query) or query
+    terms = []
+    for segment in _TERM_SEPARATOR_RE.split(cleaned):
+        segment = segment.strip().lower()
+        if len(segment) >= 2:
+            terms.append(segment)
+    return terms
+
+
+def _term_hit(term: str, blob: str) -> bool:
+    """判断核心词是否在结果里出现过。
+
+    短词要求整词命中；长词（长词组/长句，>= 8 字）改用二元组覆盖率判断，
+    避免结果只覆盖词的一部分就被当成"命中"。
+    """
+    if term in blob:
+        return True
+    if len(term) >= 8:
+        grams = [term[i:i + 2] for i in range(len(term) - 1)]
+        if grams:
+            hits = sum(1 for gram in grams if gram in blob)
+            return hits * 2 >= len(grams)
+    return False
+
+
+def _is_degraded(query: str, results: list) -> bool:
+    """判断结果是否为搜索引擎的"泛页"降级结果（中英文查询都适用）。
+
+    规则（满足任一条即判为降级）：
+    1) 查询里的型号/数字/字母等强特征词，一个都没在结果里出现；
+    2) 查询里的长核心词（>= 4 字，如"工程资料管理"）一个都没在结果里出现。
+
+    Bing 有时会把查询退化成第一个词（如"工程资料管理"->"工程"），返回一批
+    与查询无关的通用页面，这种情况需要换入口或换检索词重试。
+    """
+    strong_tokens = _query_strong_tokens(query)
+    terms = _query_core_terms(query)
+    if not strong_tokens and not terms:
         return False
     blob = " ".join(
-        f"{item.get('title', '')} {item.get('href', '')}".lower()
+        f"{item.get('title', '')} {item.get('href', '')} {item.get('body', '')}".lower()
         for item in results
     )
-    return not any(token in blob for token in tokens)
+    if strong_tokens and not any(token in blob for token in strong_tokens):
+        return True
+    key_terms = [term for term in terms if len(term) >= 4] or terms
+    return not any(_term_hit(term, blob) for term in key_terms)
 
 
 def _clean_query(query: str) -> str:
-    """去掉参数/价格/发布/最新等泛词，保留品牌+型号等核心词（用于降级重试）。"""
-    if not _query_strong_tokens(query):
-        return query
-    cleaned = query
-    for word in sorted(_WEAK_TERMS, key=len, reverse=True):
-        cleaned = cleaned.replace(word, " ")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned or query
-
+    """去掉参数/价格/发布/最新等泛词，保留核心词（用于降级重试）。"""
+    return _strip_weak_terms(query) or query
 
 def _format_results(raw_results: list) -> str:
     """把结果列表拼接成返回文本（格式保持不变）。"""
@@ -231,12 +274,16 @@ def web_search(
 
     # 所有尝试都没有拿到"干净"结果，按优先级兜底返回
     if degraded_results is not None:
-        text = _format_results(degraded_results)
-        return (
-            f"{text}\n\n"
-            f"[提示] 以上为「{query}」多次重试的结果，仍疑似品牌通用页面，"
-            f"未包含与搜索词直接相关的具体资料，请勿据此编造内容"
+        titles = " / ".join(item.get("title", "无标题") for item in degraded_results[:3])
+        log.warning(
+            f" [WebSearch] 多次重试后仍判定为泛页，已丢弃 {len(degraded_results)} 条结果: {titles}"
         )
+        return (
+            f"[INFO] 未搜索到与「{query}」相关的可靠结果\n"
+            f"[提示] 搜索入口返回的是与该查询无关的通用页面（搜索引擎降级结果或被识别为机器人），"
+            f"已丢弃，请勿据此编造内容；可换用更具体的检索词重试，或基于其他来源回答。"
+        )
+
     if completed > 0 and empty_count == completed:
         return f"[INFO] 未搜索到与「{query}」相关的结果"
     if last_error is not None:

@@ -124,12 +124,16 @@ class CircuitBreakerMiddleware(AgentMiddleware):
             raise
 
 
-def build_agent_middleware():
-    """组装 agent 弹性中间件：熔断 → 工具上限 → 重试"""
+def build_agent_middleware(tool_run_limit: int = 10):
+    """组装 agent 弹性中间件：熔断 → 工具上限 → 重试
+
+    tool_run_limit: 单次任务内允许的工具调用总次数（保险丝，防止 Agent 在工具间死循环）。
+    文档类任务至少需要「找文件 → 读文件 → 写文件」3 次，再叠加重试与结果校验，
+    上限过低会把正常任务直接拦死（原值 2 就会导致读文件被拦截）。
+    """
     middleware = [
         CircuitBreakerMiddleware(),
-        # 保险丝：单次任务内所有工具总调用最多 2 次
-        ToolCallLimitMiddleware(run_limit=2),
+        ToolCallLimitMiddleware(run_limit=tool_run_limit),
         # 重试：临时抖动重试 1 次
         ModelRetryMiddleware(max_retries=1, retry_on=TRANSIENT_ERRORS, on_failure="error"),
     ]
