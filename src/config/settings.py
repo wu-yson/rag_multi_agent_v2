@@ -24,7 +24,7 @@ class AppSettings(BaseSettings):
 
     #  qwen 通义千问 __
     qwen_api_key: SecretStr = SecretStr("")
-    qwen_base_url: str = "https://ws-30uu5ov858l45bjs.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_timeout: int = 15
     qwen_temperature: float = 0.7
 
@@ -46,7 +46,7 @@ class AppSettings(BaseSettings):
     agent_debug_mode: bool = True  # 调试模式
     agent_security_check: bool = False  # 提示词注入安全检测开关（默认关闭False）
 
-    supervisor_agent_model: Optional[str] = "deepseek-v4-flash-0731"  # 主Agent使用模型：云端
+    supervisor_agent_model: Optional[str] = "glm-5.3-flash"  # 主Agent使用模型：云端
 
     # 本地 mcp配置__
     mcp_server_path: str = ""   # 不写死, 可设置根据需求设置路径

@@ -65,6 +65,7 @@ class GLMNProvider:
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
                 temperature=self.config.temperature,
+                reasoning_effort="high",
                 max_retries=1,
             )
         else:
@@ -78,7 +79,7 @@ class GLMNProvider:
 
 class QWENProvider:
     """ QWEN供应商类, 创建客户端."""
-    supported_models_chat = ["deepseek-v4-flash-0731"]
+    supported_models_chat = ["qwen3.8-flash", "deepseek-v4-flash-0731"]
     supported_models_embed = ["qwen3.7-text-embedding"]
 
     def __init__(self, config: ProviderConfig):
@@ -98,6 +99,7 @@ class QWENProvider:
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
                 temperature=self.config.temperature,
+                reasoning_effort="high",
                 max_retries=1,
             )
         else:

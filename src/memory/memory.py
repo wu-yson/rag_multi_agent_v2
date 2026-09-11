@@ -133,16 +133,19 @@ class CommonMemory:
 
 
     def get_recent(self) -> List[Dict[str, str]]:
-        """获取对话记录"""
+        """获取最近对话记录（仅 human/ai，不包含工具明细）"""
         with Session(self.engine) as session:
             try:
                 all_rows = session.exec(
                     select(ChatRecord)
-                    .where(ChatRecord.session_id == self.session_id)
+                    .where(
+                        ChatRecord.session_id == self.session_id,
+                        ChatRecord.deleted == False,
+                        ChatRecord.role.in_(["human", "ai"]),
+                    )
                     .order_by(ChatRecord.create_time.desc())
                     .limit(50)
-
-                ).all()   # 获取所有查询结果
+                ).all()
             except Exception as e:
                 log.error(f"[memory]获取记忆失败：{e}")
                 return []
