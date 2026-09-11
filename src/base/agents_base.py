@@ -1,3 +1,6 @@
+
+
+from src.llm.resilience import build_agent_middleware
 from src.utils.logger import log
 from dataclasses import dataclass
 from typing import Optional, List, Any, Dict, TypedDict
@@ -10,8 +13,10 @@ from src.llm.factory import llm_factory
 
 class NodeKeyBase:
     # 统一存放所有Graph子节点标识
-    RAG_AGENT = "rag_agent"
+    RAG_SEARCH = "rag_search"  # 知识库检索节点(普通函数节点)
+    RAG_STORAGE = "rag_storage"  # 文档入库节点(普通函数节点)
     DOC_AGENT = "doc_agent"
+    WEB_SEARCH = "web_search"  # 联网搜索节点(普通函数节点)
 
 
 
@@ -70,22 +75,27 @@ class BaseAgentTemplate:
     @property
     def tools(self) -> list[Any]:
         """
-        父类仅做接口约束：返回当前Agent可用的工具实例列表
-        加载逻辑、来源、筛选全部由子类自主实现
+        加载工具
         """
         raise NotImplementedError("子类必须重写，实现自身工具实例的加载与组装")
 
-    @property
-    def default_agent(self):
-        """ 懒加载拼装langchain原生Agent执行实例 """
+    async def _load_tools(self):
+        """加载mcp工具：默认用本地 tools 属性；子类可覆写为 MCP 加载"""
+        return self.tools
+
+    async def get_agent(self):
+        """异步获取 agent：先加载工具（可能来自 MCP），再创建"""
         if self._default_agent is None:
+            tools = await self._load_tools()
             self._default_agent = create_agent(
                 model=self.llm,
                 system_prompt=self.system_prompt,
-                tools=self.tools,
-                middleware=[]
+                tools=tools,
+                middleware=build_agent_middleware(),
             )
         return self._default_agent
+
+
 
     @property
     def output_key(self) -> str:
@@ -97,7 +107,7 @@ class BaseAgentTemplate:
         raise NotImplementedError("子类需要实现 _get_error_tip 方法")
 
 
-    def _invoke_core(self, messages: List[Any]) -> str:
+    async def _invoke_core(self, messages: List[Any]) -> str:
         """
         通用推理执行外壳，统一异常捕获
         :param messages: 消息列表，由子类自行组装传入
@@ -105,8 +115,9 @@ class BaseAgentTemplate:
         """
         log.info(f"[SubAgentInner][{self.output_key}] 开始调用Agent推理")
         try:
-            agent = self.default_agent
-            resp = agent.invoke({"messages": messages})
+            agent = await self.get_agent()
+            resp = await agent.ainvoke({"messages": messages})
+
             msg_list = resp["messages"]
             last_msg = msg_list[-1]
 
@@ -122,6 +133,9 @@ class BaseAgentTemplate:
                 log.info(f"[SubAgentInner][{self.output_key}] LLM决策：无工具调用，直接输出回复")
 
             result_content = last_msg.content
+            if not result_content:  # 既没调工具、又没输出 = 异常
+                log.warning(f"[SubAgentInner][{self.output_key}] 模型无有效输出，任务将按失败处理")
+                result_content = ""
             log.info(f"[SubAgentInner][{self.output_key}] Agent推理完成")
             return result_content
 
@@ -131,55 +145,101 @@ class BaseAgentTemplate:
                 raise RuntimeError(f"Agent执行异常: {str(e)}")
             return self._get_error_tip()
 
-    def invoke_wrapper(self, state: GraphState) -> GraphState:
+
+    async def ainvoke_wrapper(self, state: GraphState) -> GraphState:
         """ 子Agent任务入口：从图状态取当前任务、执行并回写 agent_outputs。 """
         log.info(f"[SubAgentInner][{self.output_key}] 进入子Agent任务执行流程")
-        task_messages = state.get("task_messages") or {}
-        current_task_id = state.get("current_task_id")
-        current_task = (
-            task_messages.get(str(current_task_id))
-            if current_task_id is not None
-            else None
+        return await run_node(
+            state,
+            self.output_key,
+            self._run_agent_task,
+            empty_error="子Agent未生成有效结果（未调用工具也未输出内容）",
         )
-        if current_task is None:
-            log.warning(f"[SubAgentInner][{self.output_key}] 未找到当前任务，回写状态")
-            state["current_task_id"] = None
-            state["runtime_task_inputs"] = []
-            return state
 
-        task_content = current_task.get("task_content", "")
-        extra_inputs = state.get("runtime_task_inputs") or []
-        if extra_inputs:
-            task_content = task_content + "\n\n" + "\n\n".join(extra_inputs)
+    async def _run_agent_task(self, content: str) -> str:
+        """ Agent 型节点的实际执行：拼 system_prompt + 任务内容，走 LLM 推理。 """
         messages = [
             SystemMessage(content=self.system_prompt),
-            HumanMessage(content=task_content),
+            HumanMessage(content=content),
         ]
-        try:
-            result_text = self._invoke_core(messages)
-        except Exception as e:
-            log.error(f"[SubAgentInner][{self.output_key}] 子Agent执行异常：{e}", exc_info=True)
-            state["agent_outputs"] = {
-                **state.get("agent_outputs", {}),
-                str(current_task_id): {
-                    "target_agent": self.output_key,
-                    "result": "",
-                    "error": str(e),
-                },
-            }
-            state["current_task_id"] = None
-            state["runtime_task_inputs"] = []
-            return state
+        result_text = await self._invoke_core(messages)
+        log.info(f"[SubAgentInner][{self.output_key}] 子Agent处理完成")
+        return result_text
 
-        state["agent_outputs"] = {
-            **state.get("agent_outputs", {}),
-            str(current_task_id): {
-                "target_agent": self.output_key,
-                "result": result_text,
-                "error": "",
-            },
-        }
+
+# ===== 图节点公共函数：Agent 子节点与普通函数节点共用，统一回写状态 =====
+
+
+def _resolve_node_task(state: GraphState):
+    """ 取出当前要执行的任务，返回 (任务ID, 拼接好前置结果的完整内容)。
+
+    :param state: 图节点共享状态
+    :return: (task_id, content)；若状态里没有当前任务，task_id 为 None
+    """
+    task_messages = state.get("task_messages") or {}
+    current_task_id = state.get("current_task_id")
+    task_id = str(current_task_id) if current_task_id is not None else None
+    task = task_messages.get(task_id) if task_id is not None else None
+    if task is None:
+        return None, ""
+
+    content = task.get("task_content", "")
+    extra_inputs = state.get("runtime_task_inputs") or []
+    if extra_inputs:
+        content = content + "\n\n" + "\n\n".join(extra_inputs)
+    return task_id, content
+
+
+def _save_node_output(
+    state: GraphState,
+    task_id: str,
+    output_key: str,
+    result: str,
+    error: str = "",
+) -> GraphState:
+    """ 节点处理完成后，统一把结果写回 agent_outputs 并复位本次任务字段。
+
+    :param state: 图节点共享状态（原地修改并返回）
+    :param task_id: 当前任务ID
+    :param output_key: 节点在图中的路由名（target_agent）
+    :param result: 节点处理结果文本
+    :param error: 失败原因，为空表示成功
+    """
+    state["agent_outputs"] = {
+        **state.get("agent_outputs", {}),
+        str(task_id): {
+            "target_agent": output_key,
+            "result": result,
+            "error": error,
+        },
+    }
+    state["current_task_id"] = None
+    state["runtime_task_inputs"] = []
+    return state
+
+
+async def run_node(
+    state: GraphState,
+    output_key: str,
+    runner: Any,
+    empty_error: str = "节点执行未返回有效结果",
+) -> GraphState:
+    """ 统一节点执行：取任务 → runner(content) 执行 → 结果/异常兜底写回。
+
+    供 Agent 子节点与普通函数节点共用：正常结果写 result；
+    执行抛异常或返回空时，统一把提示写进 error，保证各节点写回的消息字段格式一致。
+    """
+    task_id, content = _resolve_node_task(state)
+    if task_id is None:
+        log.warning(f"[GraphNode][{output_key}] 未找到当前任务，回写状态")
         state["current_task_id"] = None
         state["runtime_task_inputs"] = []
-        log.info(f"[SubAgentInner][{self.output_key}] 子Agent处理完成")
         return state
+
+    try:
+        text = str(await runner(content) or "").strip()
+        error = "" if text else empty_error
+    except Exception as e:
+        log.error(f"[GraphNode][{output_key}] 节点执行异常：{e}", exc_info=True)
+        text, error = "", str(e)
+    return _save_node_output(state, task_id, output_key, text, error)

@@ -1,10 +1,9 @@
 
 from typing import Any
+
+from src.mcp.client import get_doc_tools
 from src.prompts import get_prompt
 from src.base.agents_base import BaseAgentTemplate, BaseAgentConfig, NodeKeyBase
-from src.doc_agent import doc_tools
-from src.doc_agent.doc_tools.registry import tool_registry
-from src.doc_agent.doc_agent_skill import get_doc_agent_skill
 from src.supervisor_agent.graph_tool.graph import agents_graph
 
 
@@ -25,11 +24,10 @@ class DocumentAgent(BaseAgentTemplate):
             self._system_prompt = get_prompt("doc_agent_prompt")
         return self._system_prompt
 
-    @property
-    def tools(self) -> list[Any]:
-        if self._tools is None:
-            self._tools = [get_doc_agent_skill] + tool_registry.get_all()
-        return self._tools
+    async def _load_tools(self):
+        """doc 工具从 MCP 加载"""
+        return await get_doc_tools()
+
 
     @property
     def output_key(self) -> str:

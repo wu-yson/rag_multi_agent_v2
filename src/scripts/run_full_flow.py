@@ -2,7 +2,10 @@
 
 import sys
 from pathlib import Path
+import asyncio
 
+from src.doc_agent.document_agent import doc_agent
+from src.mcp.client import close
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -17,16 +20,27 @@ test_memory = CommonMemory(session_id="test_session_id_001")
 si_agent = SupervisorAgent(memory=test_memory)
 
 
-def run_test():
+async def run_test():
 
     while True:
         question = input("请输出内容")
         if question == "end" :
             break
-        result = si_agent.invoke(question)
+        result_parts = []
+        async for chunk in si_agent.astream(question):
+            result_parts.append(chunk)
+        result = "".join(result_parts)
         print("===== 完整链路输出结果 =====")
         print(result)
 
+async def main():
+    d = await doc_agent.get_agent()
+    print("doc agent 创建成功")
+    await close()
+
+
+
 
 if __name__ == "__main__":
-    run_test()
+    # asyncio.run( run_test() )
+    asyncio.run(main())

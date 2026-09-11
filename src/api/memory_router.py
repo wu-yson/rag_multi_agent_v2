@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.post("/memory/clear")
-def memory_clear_api(body: MemoryClearBody):
+async def memory_clear_api(body: MemoryClearBody):
     """
     清空指定会话记忆
     完整地址：http://127.0.0.1:8000/api/memory/clear

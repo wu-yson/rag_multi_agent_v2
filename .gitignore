@@ -15,7 +15,7 @@ __pycache__/
 logs/
 src/db/
 src/data/
-src/rag_agent/rag/kb_file_registry
+
 
 *.db
 *.sqlite
