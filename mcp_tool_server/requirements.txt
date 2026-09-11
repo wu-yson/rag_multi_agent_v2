@@ -1,0 +1,32 @@
+# MCP 工具服务依赖（doc 文件工具 / RAG 向量检索 / 联网搜索）
+# 新环境部署执行命令：pip install -r requirements.txt
+
+# MCP 框架（FastMCP）
+mcp
+
+# 配置
+pydantic==2.13.4
+pydantic-settings==2.15.0
+python-dotenv>=1.2.2
+
+# 文档工具
+python-docx==1.2.0
+openpyxl==3.1.5
+
+# RAG：向量库 / 检索 / 加载
+langchain-core==1.5.4
+langchain-community==0.4.2
+langchain-chroma==1.1.0
+langchain-milvus
+langchain-text-splitters==1.1.2
+langchain-ollama==1.1.0
+chromadb
+faiss-cpu>=1.14.3
+pymupdf
+
+# LLM（OpenAI 兼容，服务端语义/嵌入可选）
+openai
+
+# 联网搜索（直连 Bing + lxml 解析）
+requests
+lxml

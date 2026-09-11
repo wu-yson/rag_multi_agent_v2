@@ -1,0 +1,42 @@
+# git上传屏蔽配置信息
+# 敏感配置
+mcp_src/memory/mysql_config.yml
+.env
+.env.*
+!.env.example
+
+
+# python运行缓存
+__pycache__/
+*.py[cod]
+*.so
+
+# 虚拟环境和构建产物
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+
+# IDE配置
+.idea/
+*.iml
+
+# 运行日志、数据目录等
+logs/
+mcp_src/db/
+mcp_src/data/
+mcp_src/rag_tool/rag/kb_file_registry.json
+workspace/
+
+*.db
+*.sqlite
+*.sqlite3
+
+# 测试/检查缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
