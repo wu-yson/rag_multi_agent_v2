@@ -203,7 +203,7 @@ class SupervisorAgent(BaseAgentTemplate):
             agent = await self._get_agent(tmp_model, tmp_tools)
             log.info(f"[TopSupervisor] 开始构建主层Agent")
 
-            full_text: list[str] = []
+            full_text: list[str] = []               # 消息块
             all_msgs: list[BaseMessage] = []          # 收集所有消息（含工具消息）
 
             with get_openai_callback() as cb:
