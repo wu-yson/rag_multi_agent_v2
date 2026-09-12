@@ -27,20 +27,21 @@ async def run_test():
         if question == "end" :
             break
         result_parts = []
-        async for chunk in si_agent.astream(question):
-            result_parts.append(chunk)
+        async for item in si_agent.astream(question):
+            if isinstance(item, tuple) and item[0] == "content":
+                result_parts.append(item[1])
         result = "".join(result_parts)
         print("===== 完整链路输出结果 =====")
         print(result)
 
 async def main():
-    d = await doc_agent.get_agent()
+    await doc_agent.get_agent()
     print("doc agent 创建成功")
-    await close()
+    await close()  # 关闭mcp进程
 
 
 
 
 if __name__ == "__main__":
-    # asyncio.run( run_test() )
-    asyncio.run(main())
+    asyncio.run( run_test() )
+    # asyncio.run(main())
