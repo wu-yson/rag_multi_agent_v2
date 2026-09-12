@@ -188,7 +188,6 @@ class SupervisorAgent(BaseAgentTemplate):
         user_input: str,
         tmp_model: Optional[str] = None,
         tmp_tools: Optional[list[Any]] = None,
-        tmp_prompt: Optional[str] = None,
     ):
         """流式调用智能体：逐块产出回答增量（异步生成器）"""
         try:
